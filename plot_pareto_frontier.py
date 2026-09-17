@@ -1,33 +1,13 @@
 import json
-import sys
+import time
 from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-gatr_dir = ROOT_DIR / "geometric-algebra-transformer"
-if gatr_dir.exists() and str(gatr_dir) not in sys.path:
-    sys.path.insert(0, str(gatr_dir))
-
-from src.xformers_stub import ensure_xformers_stub
-
-ensure_xformers_stub()
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from balanced_irreps import WeightBalancedIrreps
 from e3nn.o3 import Irreps
-
-try:
-    from gatr import GATr, MLPConfig, SelfAttentionConfig
-except ImportError:
-
-    class GATr:  # type: ignore
-        """Placeholder for GATr when not available."""
-
-    MLPConfig = None  # type: ignore
-    SelfAttentionConfig = None  # type: ignore
+from gatr import GATr, MLPConfig, SelfAttentionConfig
 from segnn.segnn import SEGNN
 from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.data import Data as PyGData
@@ -207,14 +187,14 @@ def prepare_inputs(B: int = 64, N: int = 15, device: str = "cuda"):
     return forward_fns
 
 
-def measure_flops_and_latency(models, forward_fns):
+def measure_flops(models, forward_fns):
+    """FLOPs + parameter counts (hardware-independent)."""
     results = {}
 
     for name, (model, key) in models.items():
         fn = forward_fns[name]
         model.eval()
 
-        # FLOPs counting on CPU/no_grad for accuracy
         counter = FlopCounterMode(display=False)
         with counter, torch.no_grad():
             fn(model)
@@ -227,6 +207,109 @@ def measure_flops_and_latency(models, forward_fns):
             "flops": flops,
             "gflops": flops / 1e9,
         }
+
+    return results
+
+
+def measure_memory(models, forward_fns, device: str = "cuda"):
+    """Peak CUDA memory allocated during a single forward pass, in MB.
+
+    NOTE: this is hardware/driver/PyTorch-version dependent (allocator
+    behaviour, cuDNN algorithm choice, fragmentation, etc.) and only
+    meaningful on CUDA. On CPU it falls back to NaN since there is no
+    reliable, portable equivalent of `max_memory_allocated`.
+    """
+    results = {}
+
+    for name, (model, key) in models.items():
+        fn = forward_fns[name]
+        model.eval()
+
+        if device == "cuda" and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            with torch.no_grad():
+                fn(model)
+            torch.cuda.synchronize()
+            peak_mb = torch.cuda.max_memory_allocated() / (1024**2)
+        else:
+            peak_mb = float("nan")
+
+        results[name] = {"peak_mem_mb": peak_mb}
+
+    return results
+
+
+def measure_latency(models, forward_fns, device: str = "cuda", n_warmup: int = 10, n_repeats: int = 50):
+    """Wall-clock inference latency per forward pass, in milliseconds.
+
+    NOTE: this is entirely hardware-dependent (GPU/CPU model, clocks,
+    thermal state, other processes on the machine, PyTorch/cuDNN version,
+    etc.) and should only be compared *within* a single benchmarking run
+    on the same machine — never across machines or papers.
+    """
+    results = {}
+
+    for name, (model, key) in models.items():
+        fn = forward_fns[name]
+        model.eval()
+
+        with torch.no_grad():
+            # Warmup: let cuDNN autotune, JIT/caches warm up, allocator settle.
+            for _ in range(n_warmup):
+                fn(model)
+            if device == "cuda" and torch.cuda.is_available():
+                torch.cuda.synchronize()
+
+            times_ms = []
+            for _ in range(n_repeats):
+                if device == "cuda" and torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                start = time.perf_counter()
+                fn(model)
+                if device == "cuda" and torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                times_ms.append((time.perf_counter() - start) * 1000.0)
+
+        results[name] = {
+            "mean_latency_ms": float(np.mean(times_ms)),
+            "std_latency_ms": float(np.std(times_ms)),
+            "n_repeats": n_repeats,
+        }
+
+    return results
+
+
+def measure_efficiency_metrics(
+    models,
+    forward_fns,
+    device: str = "cuda",
+    n_warmup: int = 10,
+    n_repeats: int = 50,
+    measure_mem: bool = True,
+    measure_time: bool = True,
+):
+    """Combine FLOPs/params (hardware-independent) with optional
+    memory and latency (hardware-dependent) measurements into one dict.
+
+    Kept as three separate passes over the models rather than one fused
+    loop: the FlopCounterMode context and CUDA memory-stat resets can
+    otherwise interfere with each other's readings.
+    """
+    results = measure_flops(models, forward_fns)
+
+    if measure_mem:
+        mem_results = measure_memory(models, forward_fns, device=device)
+        for name, r in mem_results.items():
+            results[name].update(r)
+
+    if measure_time:
+        lat_results = measure_latency(
+            models, forward_fns, device=device, n_warmup=n_warmup, n_repeats=n_repeats
+        )
+        for name, r in lat_results.items():
+            results[name].update(r)
 
     return results
 
@@ -248,11 +331,69 @@ def compute_pareto_frontier(x_vals, y_vals):
     return pareto_indices
 
 
-def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path):
+def _plot_pareto_panel(ax, x_vals, y_vals, y_stds, model_names, benchmark_results, style_map, anno_offsets, xlabel, title, label_params=False):
+    pareto_idx = compute_pareto_frontier(x_vals, y_vals)
+    pareto_x = [x_vals[i] for i in pareto_idx]
+    pareto_y = [y_vals[i] for i in pareto_idx]
+    ax.step(pareto_x, pareto_y, where="post", color="#333333", linestyle="--", linewidth=1.8, alpha=0.85, label="Pareto Frontier")
+    ax.plot(pareto_x, pareto_y, color="#333333", alpha=0.3, linewidth=1.0)
+
+    for i, name in enumerate(model_names):
+        st = style_map.get(name, {"color": "#333", "marker": "o", "label": name})
+        if label_params:
+            pk = benchmark_results[name]["params"] / 1e3
+            lbl = f"{name} ({pk:.0f}k params)"
+        else:
+            lbl = name
+
+        ax.errorbar(
+            x_vals[i],
+            y_vals[i],
+            yerr=y_stds[i],
+            fmt=st["marker"],
+            color=st["color"],
+            markersize=9,
+            capsize=3,
+            elinewidth=1.5,
+            markeredgewidth=1.2,
+            markeredgecolor="black",
+            label=lbl,
+        )
+        dx, dy = anno_offsets.get(name, (0.3, 0.00005))
+        ax.annotate(
+            name,
+            (x_vals[i], y_vals[i]),
+            xytext=(x_vals[i] + dx, y_vals[i] + dy),
+            fontsize=9.5,
+            fontweight="bold" if "PGA" in name else "normal",
+            color=st["color"],
+        )
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Test OOD Loss (MSE)")
+    ax.set_yscale("log")
+    ax.set_title(title)
+    ax.grid(True, linestyle=":", alpha=0.6)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=True, framealpha=0.9, loc="best")
+
+
+def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path, device: str = "cuda"):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model_names = list(benchmark_results.keys())
     gflops = [benchmark_results[m]["gflops"] for m in model_names]
+    params_k = [benchmark_results[m]["params"] / 1e3 for m in model_names]
+
+    has_latency = all("mean_latency_ms" in benchmark_results[m] for m in model_names)
+    has_memory = all(
+        "peak_mem_mb" in benchmark_results[m] and not np.isnan(benchmark_results[m]["peak_mem_mb"])
+        for m in model_names
+    )
+
+    latency_ms = [benchmark_results[m].get("mean_latency_ms", float("nan")) for m in model_names]
+    latency_std = [benchmark_results[m].get("std_latency_ms", 0.0) for m in model_names]
+    mem_mb = [benchmark_results[m].get("peak_mem_mb", float("nan")) for m in model_names]
 
     losses = []
     loss_stds = []
@@ -271,7 +412,6 @@ def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path):
         losses.append(mean_val)
         loss_stds.append(std_val)
 
-    # Colors and markers styling
     style_map = {
         "PGA-GNN": {"color": "#1B9E77", "marker": "o", "label": "PGA-GNN"},
         "GATr": {"color": "#D95F02", "marker": "^", "label": "GATr"},
@@ -280,7 +420,6 @@ def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path):
         "SEGNN": {"color": "#E6AB02", "marker": "X", "label": "SEGNN"},
     }
 
-    # Set up publication-quality plot style
     plt.rcParams.update(
         {
             "font.family": "DejaVu Sans",
@@ -294,135 +433,72 @@ def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path):
         }
     )
 
-    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), dpi=300)
+    # Decide layout: always show FLOPs + Params; add latency/memory panels if available.
+    n_panels = 2 + int(has_latency) + int(has_memory)
+    n_cols = 2
+    n_rows = int(np.ceil(n_panels / n_cols))
+    _fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 6 * n_rows), dpi=300)
+    axes = np.array(axes).reshape(-1)
 
-    # -------------------------------------------------------------
-    # Panel 1: Test OOD Loss vs GFLOPs (Compute Efficiency)
-    # -------------------------------------------------------------
-    pareto_idx_flops = compute_pareto_frontier(gflops, losses)
-
-    # Plot Pareto line
-    pareto_x_f = [gflops[i] for i in pareto_idx_flops]
-    pareto_y_f = [losses[i] for i in pareto_idx_flops]
-    ax1.step(
-        pareto_x_f,
-        pareto_y_f,
-        where="post",
-        color="#333333",
-        linestyle="--",
-        linewidth=1.8,
-        alpha=0.85,
-        label="Pareto Frontier",
-    )
-    ax1.plot(pareto_x_f, pareto_y_f, color="#333333", alpha=0.3, linewidth=1.0)
-
-    # Custom annotation offsets for (dx, dy) in data/display coordinates
     anno_offsets_flops = {
         "EGNN": (0.4, 0.00007),
         "PGA-GNN": (0.5, 0.0000),
         "GATr": (-2.8, 0.00008),
         "SEGNN": (0.4, 0.00006),
     }
-
     anno_offsets_params = {
         "EGNN": (20, 0.0008),
         "PGA-GNN": (30, 0.0000005),
         "GATr": (-320, 0.0004),
         "SEGNN": (20, 0.0001),
     }
+    # Generic offset fallback for the new panels (auto-scaled from data range).
+    def _auto_offsets(x_vals):
+        span = (max(x_vals) - min(x_vals)) or 1.0
+        return {name: (span * 0.02, 0.0) for name in model_names}
 
-    params_k = [benchmark_results[m]["params"] / 1e3 for m in model_names]
+    panel_idx = 0
 
-    for i, name in enumerate(model_names):
-        st = style_map.get(name, {"color": "#333", "marker": "o", "label": name})
-        pk = params_k[i]
-
-        ax1.errorbar(
-            gflops[i],
-            losses[i],
-            yerr=loss_stds[i],
-            fmt=st["marker"],
-            color=st["color"],
-            markersize=9,
-            capsize=3,
-            elinewidth=1.5,
-            markeredgewidth=1.2,
-            markeredgecolor="black",
-            label=f"{name} ({pk:.0f}k params)",
-        )
-        dx, dy = anno_offsets_flops.get(name, (0.3, 0.00005))
-        ax1.annotate(
-            name,
-            (gflops[i], losses[i]),
-            xytext=(gflops[i] + dx, losses[i] + dy),
-            fontsize=9.5,
-            fontweight="bold" if "PGA" in name else "normal",
-            color=st["color"],
-        )
-
-    ax1.set_xlabel("Compute per Forward Pass [GFLOPs] (B=64, N=15)")
-    ax1.set_ylabel("Test OOD Loss (MSE)")
-    ax1.set_yscale("log")
-    ax1.set_title("(a) Compute Efficiency: Accuracy vs. FLOPs")
-    ax1.grid(True, linestyle=":", alpha=0.6)
-    ax1.set_axisbelow(True)
-    ax1.legend(frameon=True, framealpha=0.9, loc="best")
-
-    # -------------------------------------------------------------
-    # Panel 2: Test OOD Loss vs Parameters (Parameter Efficiency)
-    # -------------------------------------------------------------
-    pareto_idx_params = compute_pareto_frontier(params_k, losses)
-    pareto_x_p = [params_k[i] for i in pareto_idx_params]
-    pareto_y_p = [losses[i] for i in pareto_idx_params]
-    ax2.step(
-        pareto_x_p,
-        pareto_y_p,
-        where="post",
-        color="#333333",
-        linestyle="--",
-        linewidth=1.8,
-        alpha=0.85,
-        label="Pareto Frontier",
+    _plot_pareto_panel(
+        axes[panel_idx], gflops, losses, loss_stds, model_names, benchmark_results, style_map,
+        anno_offsets_flops, "Compute per Forward Pass [GFLOPs] (B=64, N=15)",
+        "(a) Compute Efficiency: Accuracy vs. FLOPs", label_params=True,
     )
-    ax2.plot(pareto_x_p, pareto_y_p, color="#333333", alpha=0.3, linewidth=1.0)
+    panel_idx += 1
 
-    for i, name in enumerate(model_names):
-        st = style_map.get(name, {"color": "#333", "marker": "o", "label": name})
-        ax2.errorbar(
-            params_k[i],
-            losses[i],
-            yerr=loss_stds[i],
-            fmt=st["marker"],
-            color=st["color"],
-            markersize=9,
-            capsize=3,
-            elinewidth=1.5,
-            markeredgewidth=1.2,
-            markeredgecolor="black",
-            label=name,
-        )
-        dx, dy = anno_offsets_params.get(name, (20, 0.00005))
-        ax2.annotate(
-            name,
-            (params_k[i], losses[i]),
-            xytext=(params_k[i] + dx, losses[i] + dy),
-            fontsize=9.5,
-            fontweight="bold" if "PGA" in name else "normal",
-            color=st["color"],
-        )
+    _plot_pareto_panel(
+        axes[panel_idx], params_k, losses, loss_stds, model_names, benchmark_results, style_map,
+        anno_offsets_params, "Model Parameters [kParams]",
+        "(b) Parameter Efficiency: Accuracy vs. Model Size", label_params=False,
+    )
+    panel_idx += 1
 
-    ax2.set_xlabel("Model Parameters [kParams]")
-    ax2.set_ylabel("Test OOD Loss (MSE)")
-    ax2.set_yscale("log")
-    ax2.set_title("(b) Parameter Efficiency: Accuracy vs. Model Size")
-    ax2.grid(True, linestyle=":", alpha=0.6)
-    ax2.set_axisbelow(True)
-    ax2.legend(frameon=True, framealpha=0.9, loc="best")
+    panel_letter = ord("c")
+    if has_latency:
+        _plot_pareto_panel(
+            axes[panel_idx], latency_ms, losses, loss_stds, model_names, benchmark_results, style_map,
+            _auto_offsets(latency_ms), "Inference Latency [ms/forward] (hardware-dependent)",
+            f"({chr(panel_letter)}) Latency Efficiency: Accuracy vs. Wall-clock Time", label_params=False,
+        )
+        panel_idx += 1
+        panel_letter += 1
+
+    if has_memory:
+        _plot_pareto_panel(
+            axes[panel_idx], mem_mb, losses, loss_stds, model_names, benchmark_results, style_map,
+            _auto_offsets(mem_mb), "Peak GPU Memory [MB] (hardware-dependent)",
+            f"({chr(panel_letter)}) Memory Efficiency: Accuracy vs. Peak Memory", label_params=False,
+        )
+        panel_idx += 1
+
+    # Hide any unused axes (e.g. odd panel count in a 2-col grid).
+    for j in range(panel_idx, len(axes)):
+        axes[j].axis("off")
 
     num_seeds = max(num_seeds_list) if num_seeds_list else 1
     seed_str = f"{num_seeds} Seeds" if num_seeds > 1 else "Seed 0"
-    plt.suptitle(f"Pareto Efficiency on N-body Benchmark (Subsample 0.001, {seed_str})", fontsize=16, y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.suptitle(f"Pareto Efficiency on N-body Benchmark (100 examples, {seed_str})", fontsize=16, y=0.995)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
 
     png_path = output_dir / "pareto_frontier.png"
     pdf_path = output_dir / "pareto_frontier.pdf"
@@ -437,21 +513,34 @@ def generate_pareto_plots(benchmark_results, nbody_data, output_dir: Path):
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Running Pareto benchmark on device: {device}...")
+    if device == "cpu":
+        print("  (No CUDA device found: memory measurement will be skipped, and "
+              "latency numbers are CPU wall-clock time only.)")
 
     nbody_data = load_nbody_data()
     models = build_models(device)
     forward_fns = prepare_inputs(B=64, N=15, device=device)
 
-    print("\nMeasuring FLOPs and Latency...")
-    bench_results = measure_flops_and_latency(models, forward_fns)
+    print("\nMeasuring FLOPs, memory and latency...")
+    bench_results = measure_efficiency_metrics(
+        models,
+        forward_fns,
+        device=device,
+        n_warmup=10,
+        n_repeats=50,
+        measure_mem=(device == "cuda"),
+        measure_time=True,
+    )
 
     print("\nGenerating Pareto plots...")
     plots_nbody_dir = Path("plots/nbody")
-    generate_pareto_plots(bench_results, nbody_data, plots_nbody_dir)
+    generate_pareto_plots(bench_results, nbody_data, plots_nbody_dir, device=device)
 
-    print("\n" + "=" * 75)
-    print(f"{'Model':<20} {'Params':>10} {'FLOPs':>14} {'Test OOD Loss (mean ± std)':>28}")
-    print("-" * 75)
+    print("\n" + "=" * 100)
+    print(
+        f"{'Model':<12} {'Params':>10} {'FLOPs':>13} {'Latency (ms)':>16} {'Peak Mem (MB)':>14} {'Test OOD Loss (mean ± std)':>28}"
+    )
+    print("-" * 100)
     for name, r in bench_results.items():
         k = r["key"]
         m_info = nbody_data.get(k, {})
@@ -465,8 +554,22 @@ def main():
             )
         else:
             loss_str = "N/A"
-        print(f"{name:<20} {r['params']:>10,d} {r['gflops']:>11.3f} G {loss_str:>28}")
-    print("=" * 75)
+
+        lat_str = (
+            f"{r['mean_latency_ms']:.3f} ± {r['std_latency_ms']:.3f}"
+            if "mean_latency_ms" in r
+            else "N/A"
+        )
+        mem_val = r.get("peak_mem_mb", float("nan"))
+        mem_str = f"{mem_val:.1f}" if not np.isnan(mem_val) else "N/A"
+
+        print(
+            f"{name:<12} {r['params']:>10,d} {r['gflops']:>10.3f} G {lat_str:>16} {mem_str:>14} {loss_str:>28}"
+        )
+    print("=" * 100)
+    print("\nNote: latency and memory figures are hardware/software-stack dependent")
+    print("(GPU model, drivers, cuDNN, PyTorch version, thermal/load state) and are")
+    print("only meaningful for comparisons made within this same run/machine.")
 
 
 if __name__ == "__main__":
