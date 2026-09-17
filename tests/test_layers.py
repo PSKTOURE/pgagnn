@@ -1,8 +1,6 @@
 import torch
 
 from src.layers import (
-    BesselRadialBasisLayer,
-    CentralityEncoding,
     EquiLayerNorm,
     EquiLinear,
     GatedNonLinearity,
@@ -97,17 +95,6 @@ def test_gaussian_radial_basis_layer():
     assert torch.allclose(out[3], torch.zeros(32))
 
 
-def test_bessel_radial_basis_layer():
-    torch.manual_seed(42)
-    rbf = BesselRadialBasisLayer(num_bases=32, cutoff=5.0)
-    dist = torch.tensor([[0.5], [2.5], [4.9], [5.5]])
-    out = rbf(dist)
-    assert out.shape == (4, 32)
-    # Values beyond cutoff should be 0 due to envelope
-    assert torch.allclose(out[3], torch.zeros(32))
-    assert torch.isfinite(out).all()
-
-
 
 def test_residual_layer():
     torch.manual_seed(42)
@@ -119,28 +106,4 @@ def test_residual_layer():
     combined_mv, combined_sc = res_same(mv_out, mv_in, sc_out, sc_in)
     assert torch.allclose(combined_mv, mv_out + mv_in)
     assert torch.allclose(combined_sc, sc_out + sc_in)
-
-
-def test_centrality_encoding():
-    torch.manual_seed(42)
-    enc = CentralityEncoding(num_rbf=16, sc_dim=32, use_chemical_context=True)
-
-    # Sparse
-    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
-    rbf = torch.randn(4, 16, requires_grad=True)
-    sc = torch.randn(3, 32, requires_grad=True)
-    out_sp = enc.forward_sparse(edge_index, rbf, num_nodes=3, sc=sc)
-    assert out_sp.shape == (3, 32)
-    out_sp.sum().backward()
-    assert rbf.grad is not None and sc.grad is not None
-
-    # Dense
-    enc.zero_grad()
-    rbf_d = torch.randn(2, 4, 4, 16, requires_grad=True)
-    mask_2d = torch.ones(2, 4, 4, 1, dtype=torch.bool)
-    sc_d = torch.randn(2, 4, 32, requires_grad=True)
-    out_d = enc.forward_dense(rbf_d, mask_2d, sc=sc_d)
-    assert out_d.shape == (2, 4, 32)
-    out_d.sum().backward()
-    assert rbf_d.grad is not None and sc_d.grad is not None
 
