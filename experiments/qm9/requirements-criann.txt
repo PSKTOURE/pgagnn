@@ -1,0 +1,12 @@
+# Small overlay for aidl/pytorch/2.6.0-py3.12-cuda12.6.
+# Install with --no-deps: reuse the module's torch, CUDA, NumPy, SciPy,
+# TensorBoard and general Python packages. Native wheels must match torch/CUDA.
+--find-links https://data.pyg.org/whl/torch-2.6.0+cu126.html
+torch-geometric==2.7.0
+torch-scatter==2.1.2+pt26cu126
+torch-cluster==1.6.3+pt26cu126
+einops==0.8.1
+pytest==8.4.2
+iniconfig==2.1.0
+pluggy==1.6.0
+pygments==2.19.2

@@ -29,6 +29,22 @@ fi
 [[ "$MODEL_NAME" == pgagnn || "$MODEL_NAME" == gatr ]] || exit 2
 [[ "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "Invalid run name" >&2; exit 2; }
 
+# Load the module used to build the overlay, also after an automatic requeue.
+QM9_MODULE="${QM9_MODULE:-}"
+if [[ -z "$QM9_MODULE" && -r "$PROJECT_DIR/.venv/criann-module" ]]; then
+    read -r QM9_MODULE < "$PROJECT_DIR/.venv/criann-module"
+fi
+if ! type module >/dev/null 2>&1; then
+    set +u
+    source /opt/cray/pe/lmod/lmod/init/bash
+    set -u
+fi
+module use /soft/Modules/RH9_modules/aidl
+module purge
+if [[ -n "$QM9_MODULE" ]]; then
+    module load "$QM9_MODULE"
+fi
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 PYTHON="${QM9_PYTHON:-$PROJECT_DIR/.venv/bin/python}"
 [[ -x "$PYTHON" ]] || { echo "Python environment missing: $PYTHON; set QM9_PYTHON or create .venv." >&2; exit 1; }
 DATA_DIR="${QM9_DATA_DIR:-$HOME/datasets/qm9}"
@@ -65,7 +81,6 @@ mkdir -p "$LOCAL_SOURCE" "$LOCAL_DATA"
 rsync -a --delete "$SOURCE_DIR/" "$LOCAL_SOURCE/"
 rsync -a "$DATA_DIR/" "$LOCAL_DATA/"
 
-module purge
 export PYTHONNOUSERSITE=1
 export PYTHONUNBUFFERED=1
 export PYTHONPATH="$LOCAL_SOURCE:$LOCAL_SOURCE/geometric-algebra-transformer"
@@ -87,7 +102,7 @@ fi
 
 echo "Job=$SLURM_JOB_ID task=${SLURM_ARRAY_TASK_ID:-single} restart=${SLURM_RESTART_COUNT:-0}"
 echo "Model=$MODEL_NAME target=$TARGET source=$SOURCE_DIR results=$MODEL_RUN_DIR"
-echo "Python=$PYTHON visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+echo "Module=${QM9_MODULE:-none} Python=$PYTHON visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
 
 # Checkpoints and best weights go directly to persistent storage. Code and data
 # use node-local scratch; no final rsync is needed to make a saved epoch durable.

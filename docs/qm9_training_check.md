@@ -1,6 +1,6 @@
 # QM9 training check — 12 November 2026
 
-No training jobs were submitted. CRIANN was inspected read-only over `ssh criann`.
+The initial inspection used read-only commands over `ssh criann`. Subsequent setup and short compatibility checks are recorded below; no long training jobs have been submitted.
 
 ## Proposed training settings
 
@@ -88,3 +88,8 @@ No running MD17 training jobs were stopped, modified, or resubmitted during thes
 ## Implemented correction
 
 The centered Euclidean-dual encoding is now integrated into the QM9 and MD17 PGA-GNN wrappers and the dense/packed N-body PGA-GNN pipelines. N-body decodes centered positions and restores each system's input centroid. Baseline model paths retain their original encodings. See geometry_encoding.md for the transformation argument, checkpoint interpretation, and validation summary. The pre-fix findings above describe the checkpoint commit 3f234d7; rerunning the counterexample scripts on the corrected source now passes. The checkpoint/requeue issues listed above were subsequently addressed in the CRIANN launcher and QM9 training loop; see criann_qm9.md. Preparing the remote Python runtime and performing a MIG preflight remain outstanding. No training jobs were submitted or resumed.
+
+
+## CRIANN environment deployed
+
+The corrected QM9 source and focused tests were synced into `/home/2026011/ptoura01/pgagnn`, preserving the old ga-gnn directory. A roughly 100 MB module-based overlay now reuses shared Python 3.12.9 / PyTorch 2.6.0+cu126 rather than duplicating the locked PyTorch 2.8 stack. Twenty-six focused tests passed on CRIANN, and real-data GPU checks at batch 128 passed all three readout modes, including the largest-molecule stress batch (3.58 GiB peak allocated, reflection errors below 1e-6, finite backward gradients). See criann_qm9.md and `runs/qm9/criann_preflight/` for runtime/provenance details. Long experiment submission remains a separate step.
