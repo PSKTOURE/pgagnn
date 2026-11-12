@@ -34,6 +34,7 @@ import torch
 from torch import nn
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
+from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
@@ -379,12 +380,13 @@ def load_dataset(
     train_loader = DataLoader(
         train_set,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=RandomSampler(train_set, generator=g),
         num_workers=num_workers,
         pin_memory=True,
         persistent_workers=num_workers > 0,
         worker_init_fn=seed_worker,
-        generator=g,
+        # Worker seeds must not consume the sampler RNG on a fresh process.
+        generator=torch.Generator().manual_seed(seed + 1),
     )
     val_loader = DataLoader(
         val_set,
@@ -393,6 +395,7 @@ def load_dataset(
         num_workers=num_workers,
         pin_memory=True,
         persistent_workers=num_workers > 0,
+        generator=torch.Generator().manual_seed(seed + 2),
     )
     test_loader = DataLoader(
         test_set,
@@ -400,6 +403,7 @@ def load_dataset(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
+        generator=torch.Generator().manual_seed(seed + 3),
     )
 
     mean, mad = compute_target_stats(train_set, target_idx, ref_table)
@@ -944,7 +948,10 @@ def train_model(
     stop_handler: StopSignalHandler | None = None,
     signals_to_handle: list | None = None,
     no_tqdm: bool = False,
+    checkpoint_interval: int = 1,
 ):
+    if checkpoint_interval < 1:
+        raise ValueError("checkpoint_interval must be positive")
     optimizer = torch.optim.AdamW(
         list(model.parameters()),
         lr=lr,
@@ -1004,6 +1011,15 @@ def train_model(
         start_epoch = saved_epoch + 1
         best_val = ckpt["best_val_loss"]
         losses = ckpt["losses"]
+        best_state = ckpt.get("best_state")
+        if best_state is None and checkpoint_path and os.path.isfile(checkpoint_path):
+            best_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        epochs_without_improve = ckpt.get("epochs_without_improve", 0)
+        sampler_generator = getattr(train_loader.sampler, "generator", None)
+        if sampler_generator is not None and ckpt.get("train_sampler_state") is not None:
+            sampler_generator.set_state(ckpt["train_sampler_state"].cpu())
+        if train_loader.generator is not None and ckpt.get("train_generator_state") is not None:
+            train_loader.generator.set_state(ckpt["train_generator_state"].cpu())
         if ckpt["target_mean"] is not None:
             target_mean = ckpt["target_mean"]
         if ckpt["target_mad"] is not None:
@@ -1026,6 +1042,13 @@ def train_model(
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
             "best_val_loss": best_val,
+            "best_state": best_state,
+            "epochs_without_improve": epochs_without_improve,
+            "train_sampler_state": (train_loader.sampler.generator.get_state()
+                                    if getattr(train_loader.sampler, "generator", None) is not None else None),
+            "train_generator_state": (train_loader.generator.get_state()
+                                      if train_loader.generator is not None else None),
+            "python_rng_state": random.getstate(),
             "losses": losses,
             "target_mean": target_mean,
             "target_mad": target_mad,
@@ -1038,17 +1061,9 @@ def train_model(
         }
 
     if signals_to_handle and last_checkpoint_path:
-        stop_handler.install(
-            save_fn=lambda interrupted, signal_name=None: save_checkpoint(
-                path=last_checkpoint_path,
-                payload=build_checkpoint_payload(
-                    epoch=last_completed_epoch,
-                    interrupted=interrupted,
-                    signal_name=signal_name,
-                ),
-            ),
-            signals_to_handle=signals_to_handle,
-        )
+        # A signal only requests a stop. Save a complete epoch below, never
+        # mid-batch weights labeled with the preceding epoch number.
+        stop_handler.install(save_fn=None, signals_to_handle=signals_to_handle)
     use_tqdm = not no_tqdm
     for epoch in range(start_epoch, num_epochs + 1):
         pbar_context = (
@@ -1110,29 +1125,32 @@ def train_model(
             best_val = val_loss
             epochs_without_improve = 0
             best_state = {
-                "model": unwrap_model(eval_model).state_dict(),
+                "model": {key: value.detach().cpu().clone()
+                          for key, value in unwrap_model(eval_model).state_dict().items()},
                 "epoch": epoch,
                 "val_loss": val_loss,
             }
             if checkpoint_path is not None:
-                torch.save(best_state, checkpoint_path)
+                save_checkpoint(checkpoint_path, best_state)
         else:
             epochs_without_improve += 1
 
-        # Save last checkpoint periodically
-        if last_checkpoint_path and (epoch % 10 == 0 or epoch == num_epochs):
-            last_completed_epoch = epoch
+        last_completed_epoch = epoch
+        interrupted = stop_handler.stop_requested
+        early_stop = patience > 0 and epochs_without_improve >= patience
+        if last_checkpoint_path and (epoch % checkpoint_interval == 0 or epoch == num_epochs
+                                     or interrupted or early_stop):
             save_checkpoint(
                 path=last_checkpoint_path,
-                payload=build_checkpoint_payload(epoch=epoch),
+                payload=build_checkpoint_payload(
+                    epoch=last_completed_epoch, interrupted=interrupted,
+                    signal_name=stop_handler.last_signal if interrupted else None),
             )
 
-        # Check for stop signal
-        if stop_handler is not None and stop_handler.stop_requested:
-            print(f"Stop requested ({stop_handler.last_signal}). Saved checkpoint and stopping training.")
+        if interrupted:
+            print(f"Stop requested ({stop_handler.last_signal}); saved completed epoch {epoch}.")
             break
-
-        if patience > 0 and epochs_without_improve >= patience:
+        if early_stop:
             print("Early stopping triggered")
             break
 
@@ -1206,6 +1224,8 @@ def parse_args():
     parser.add_argument("--runs_dir", type=str, default=str(ROOT_DIR / "runs" / "qm9"))
     parser.add_argument("--data_dir", type=str, default=str(DATASET_DIR / "qm9"))
     parser.add_argument("--no_tensorboard", action="store_true")
+    parser.add_argument("--checkpoint_interval", type=int, default=1,
+                        help="Save a resumable checkpoint every N completed epochs.")
     parser.add_argument("--resume_from", type=str, default=None)
     parser.add_argument(
         "--handle_signals",
@@ -1365,6 +1385,7 @@ def main():
         stop_handler=stop_handler,
         signals_to_handle=signals_to_handle,
         no_tqdm=args.no_tqdm,
+        checkpoint_interval=args.checkpoint_interval,
     )
 
     save_metrics_to_json(

@@ -1,4 +1,5 @@
 import os
+import random
 import signal
 import tempfile
 
@@ -61,6 +62,8 @@ def _restore_rng_state(ckpt: dict):
 
     if "np_rng_state" in ckpt:
         np.random.set_state(ckpt["np_rng_state"])
+    if "python_rng_state" in ckpt:
+        random.setstate(ckpt["python_rng_state"])
 
 
 def load_checkpoint(
