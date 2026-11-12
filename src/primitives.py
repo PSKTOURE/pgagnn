@@ -32,28 +32,38 @@ def grade_project(x: torch.Tensor) -> torch.Tensor:
     return torch.einsum("gij,...j->...gi", basis, x)
 
 
-def invariants(x: torch.Tensor) -> torch.Tensor:
-    """Computes the pin-invariant components of a multivector.
+def invariants(x: torch.Tensor, *, centered: bool = False) -> torch.Tensor:
+    """Compute five scalar features under the twisted versor action.
+
+    The absolute grade-four coefficient removes its reflection sign. By default,
+    metric grade norms exclude ideal blades and give E(3)-invariant features.
+    With centered=True, full coefficient norms preserve geometry in a centered
+    molecular frame. That mode is O(3)-invariant and requires per-graph centering
+    upstream for translation invariance. Neither mode claims completeness.
 
     Parameters
     ----------
     x : torch.Tensor with shape (..., 16)
         Input multivector.
+    centered : bool
+        Include ideal coefficients in the norms for centered representations.
 
     Returns
     -------
     outputs : torch.Tensor with shape (..., 5)
-        Pin-invariant component (scalar + pseudoscalar +
-        norms of vector, bivector, and trivector parts).
+        Scalar, absolute pseudoscalar coefficient, and three grade norms.
     """
     scalar = x[..., 0:1]
-    pseudoscalar = x[..., 15:16]
+    pseudoscalar = x[..., 15:16].abs()
 
     # Add epsilon under the square root to avoid singular gradients at exactly zero norm.
     eps = 1e-12
-    v_norm = torch.sqrt(torch.sum(x[..., 1:5] * x[..., 1:5], dim=-1, keepdim=True) + eps)
-    bivector_norm = torch.sqrt(torch.sum(x[..., 5:11] * x[..., 5:11], dim=-1, keepdim=True) + eps)
-    trivector_norm = torch.sqrt(torch.sum(x[..., 11:15] * x[..., 11:15], dim=-1, keepdim=True) + eps)
+    vector = x[..., 1:5] if centered else x[..., 2:5]
+    bivector = x[..., 5:11] if centered else x[..., 8:11]
+    trivector = x[..., 11:15] if centered else x[..., 14:15]
+    v_norm = torch.sqrt(vector.square().sum(dim=-1, keepdim=True) + eps)
+    bivector_norm = torch.sqrt(bivector.square().sum(dim=-1, keepdim=True) + eps)
+    trivector_norm = torch.sqrt(trivector.square().sum(dim=-1, keepdim=True) + eps)
     outputs = torch.cat([scalar, pseudoscalar, v_norm, bivector_norm, trivector_norm], dim=-1)
     return outputs
 
@@ -199,7 +209,10 @@ def norm_squared(x: torch.Tensor) -> torch.Tensor:
 
 
 def dual(x: torch.Tensor) -> torch.Tensor:
-    """Computes the dual of a multivector f(x) = x * I^{-1}.
+    """Compute the right exterior complement in the fixed oriented basis.
+
+    The PGA pseudoscalar is not invertible. This is not multiplication by
+    I^{-1}, and the complement does not commute with translations.
 
     Parameters
     ----------
@@ -219,8 +232,9 @@ def dual(x: torch.Tensor) -> torch.Tensor:
 
 
 def anti_dual(x: torch.Tensor) -> torch.Tensor:
-    """Computes the anti-dual of a multivector f(x) = x * I.
-    Take the dual and multiply by -1 the grades 1 and 3.
+    """Compute the inverse exterior complement.
+
+    Take the dual and multiply grades 1 and 3 by -1.
 
     Parameters
     ----------
@@ -266,7 +280,10 @@ def equivariant_join(x: torch.Tensor, y: torch.Tensor, ref: torch.Tensor = None)
     y : torch.Tensor with shape (..., 16)
         Second input multivector.
     ref : torch.Tensor with shape (..., 16)
-        Reference multivector.
+        Reference multivector transforming under the same versor action.
+        Its e123 coefficient must change by det(R). Canonically re-embedded
+        Cartesian points do not supply that sign automatically under reflection.
+        Omitting ref uses a fixed canonical reference, with an SE(3) guarantee.
 
     Returns
     -------
@@ -419,13 +436,12 @@ def equi_layer_norm(
 def embed_point(x: torch.Tensor, type: str = "trivector") -> torch.Tensor:
     """
     Embed 3D coordinates.
-    type='vector': Embeds as Grade-1 (Planes through origin).
-    type='trivector': Embeds as Grade-3 (Dual PGA Points).
+    Embeds as Grade-3 (Dual PGA Points). The type argument is retained for compatibility.
     x : (B, N, 3)
     returns : (B, N, 16)
     """
     mv = torch.zeros(*x.shape[:-1], 16, device=x.device, dtype=x.dtype)
-    mv[..., 14] = 1.0  # scalar component
+    mv[..., 14] = 1.0  # homogeneous point weight
     mv[..., 13] = -x[..., 0]  # x-coordinate embedded in x_023
     mv[..., 12] = x[..., 1]  # y-coordinate embedded in x_013
     mv[..., 11] = -x[..., 2]  # z-coordinate embedded in x_012
@@ -436,9 +452,9 @@ def embed_point(x: torch.Tensor, type: str = "trivector") -> torch.Tensor:
 def extract_point(multivector: torch.Tensor, threshold: float = 1e-3) -> torch.Tensor:
     """Given a multivector, extract any potential 3D point from the trivector components.
 
-    Nota bene: if the output is interpreted a regular R^3 point,
-    this function is only equivariant if divide_by_embedding_dim=True
-    (or if the e_123 component is guaranteed to equal 1)!
+    Exact projective division is equivariant when |w| > threshold. The existing
+    near-zero denominator clamp is retained; the equivariance guarantee does
+    not apply where that clamp changes the homogeneous weight.
     """
 
     coordinates = torch.cat(

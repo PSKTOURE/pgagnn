@@ -1,0 +1,1289 @@
+\documentclass[10pt]{article}
+%\usepackage{tmlr}
+% If accepted, instead use the following line for the camera-ready submission:
+%\usepackage[accepted]{tmlr}
+% To de-anonymize and remove mentions to TMLR (for example for posting to preprint servers), instead use the following:
+\usepackage[preprint]{tmlr}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{url}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+
+
+\title{Projective Geometric Algebra Graph Neural Networks: Edge-Modulated Message Passing via the Geometric Product}
+
+\author{\name Papa Samba Khary Touré \email papa-samba-khary.toure@unicaen.fr \\
+\addr Université de Caen Normandie \\
+\AND
+\name Frédéric Jurie \email frederic.jurie@unicaen.fr  \\
+\addr Université de Caen Normandie \\
+\AND
+\name Antonin Vacheret \email vacheret@lpccaen.in2p3.fr  \\
+\addr CNRS, LPC Caen \\
+\AND
+\name Sylvain Le Tonquesse \email sylvain.le-tonquesse@ensicaen.fr  \\
+\addr CNRS, CRISMAT Caen}
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\def\month{MM}  % Insert correct month for camera-ready version
+\def\year{YYYY} % Insert correct year for camera-ready version
+\def\openreview{\url{https://openreview.net/forum?id=XXXX}} % Insert correct link to OpenReview for camera-ready version
+
+
+\begin{document}
+
+\maketitle
+\begin{abstract}
+    Processing 3D geometric graphs in physical sciences requires neural networks that strictly preserve continuous spatial symmetries. Projective Geometric Algebra (PGA) offers an expressive alternative to spherical harmonics and invariant scalars by uniformly encoding geometric primitives and rigid motions as multivectors. However, existing deep learning architectures in PGA formulate interactions primarily via set self-attention without explicit edge conditioning. We introduce the Projective Geometric Algebra Graph Neural Network (PGA-GNN), an $E(3)$-equivariant architecture that combines PGA multivector representations with edge-conditioned graph message passing. PGA-GNN explicitly computes messages between neighboring nodes using an edge-modulated geometric product, combining geometric edge multivectors (via the equivariant join) and physical scalar attributes into coupled feature streams. PGA-GNN demonstrates strong empirical advantages in low-data physical systems, particularly on interacting spring dynamics. On Revised MD17, it improves force predictions across all ten molecules compared to 2-body baselines (EGNN, SEGNN), while on QM9 it achieves the lowest error among compared 2-body models on three properties ($\mu, \alpha, C_v$). While specialized higher-order cluster expansion models remain leading for molecular potentials, our findings show that explicit geometric edge conditioning in PGA provides a principled and competitive foundation for geometric graph learning.
+\end{abstract}
+
+\section{Introduction}
+
+The intersection of deep learning and the physical sciences, often termed AI4Science, has driven immense progress in modeling 3D geometric data, ranging from molecular structures to physical simulations. Processing such data requires neural network architectures capable of understanding and strictly preserving continuous spatial symmetries, specifically 3D rotations and translations (the $E(3)$ group). Traditional Graph Neural Networks (GNNs) \citep{gcn} and standard Message-Passing Neural Networks (MPNNs) \citep{mpnn} operate primarily on invariant scalar features, rendering them fundamentally blind to the native geometric orientation of physical systems.
+
+To address this, the field of equivariant deep learning has seen rapid development, yet existing paradigms often force a difficult trade-off between computational efficiency and geometric expressivity. Methods based on invariant scalarization (e.g., EGNN \citep{egnn}) are highly efficient but computationally collapse complex directional interactions into simple distances, losing structural depth. Conversely, architectures relying on irreducible representations and spherical harmonics (e.g., SEGNN \citep{segnn}, MACE \citep{mace}) preserve angular rigor but introduce significant computational overhead due to complex tensor products.
+
+Recently, Projective Geometric Algebra (PGA) has emerged as an elegant mathematical alternative. By providing a closed algebraic system that uniformly represents geometric objects (points, lines, planes) and transformations as multivectors, PGA bypasses the need for cumbersome tensor products. The Geometric Algebra Transformer \citep[GATr;][]{gatr} demonstrated the potential of this approach, maintaining strict $E(3)$ equivariance via scalable dot-product attention on sets of multivectors. However, standard PGA transformers rely on global self-attention and lack mechanisms to ingest explicit geometric and physical edge attributes. Furthermore, in low-data regimes, backpropagating through deep multi-head attention maps when deriving physical forces via analytical gradients presents optimization challenges.
+
+In this work, we bridge the mathematical elegance of projective geometric algebra with edge-conditioned graph message passing. We introduce the \emph{Projective Geometric Algebra Graph Neural Network (PGA-GNN)}, an $E(3)$-equivariant architecture that defines structural interactions directly via the \textit{geometric product} and explicit edge representations. Rather than relying solely on node-level attention, PGA-GNN computes algebraic messages between neighboring nodes conditioned on both geometric multivector edges and scalar physical attributes. Moreover, by leveraging the bilinear distributivity of the geometric product—a property also utilized in Clifford Frame Attention \citep{gafl} our architecture factorizes message aggregation, reducing the number of expensive multivector geometric product evaluations from $\mathcal{O}(|\mathcal{E}|)$ to $\mathcal{O}(N)$.
+
+Our main contributions are summarized as follows:
+\begin{itemize}
+    \item \textbf{Edge-Conditioned PGA Message-Passing Formulation:} We propose an equivariant message-passing formulation that natively propagates 16-dimensional PGA multivectors alongside coupled scalar streams. By modulating the geometric product with explicit geometric edge attributes (via the equivariant join) and scalar attributes (such as physical interaction parameters or distance expansions), we establish a structured prior for geometric graphs.
+    \item \textbf{Equivariance Guarantees and Bilinear Factorization:} We analyze the $E(3)$ equivariance of the architecture by construction, providing rigorous proofs for the equivariant join, multivector message transformations, and invariant readout maps. We leverage bilinear distributivity to factorize geometric message aggregation, executing multivector products once per node rather than once per edge.
+    \item \textbf{Strong Performance in Low-Data and Physical Dynamics:} We evaluate PGA-GNN across synthetic physical systems and molecular benchmarks. The model exhibits standout sample efficiency and size generalization on interacting spring systems, outperforming both invariant and steerable baselines in low-data regimes.
+    \item \textbf{Empirical Characterization Across Molecular Benchmarks:} On Revised MD17, PGA-GNN achieves lower average energy and force errors than reported 2-body baselines (EGNN and SEGNN), improving force prediction across all ten evaluated molecules while remaining behind specialized higher-order cluster expansion models (MACE, NequIP). On QM9, it achieves the lowest error among compared 2-body baselines on three properties ($\mu, \alpha, C_v$).
+\end{itemize}
+
+
+\section{Related Work}
+\label{sec:related_work}
+
+A central challenge in 3D geometric deep learning is to construct neural architectures that are simultaneously equivariant to the full Euclidean group $E(3)$, computationally efficient, and sufficiently expressive to capture higher-order geometric interactions. Existing approaches can be broadly organized according to how they represent geometric information and enforce equivariance: invariant or vectorial representations, steerable representations based on irreducible group representations, local canonicalization, and, more recently, geometric algebra. We review these paradigms below and position our approach within this landscape.
+
+\noindent\textbf{Invariant, Vectorial, and Steerable Representations.}
+Early geometric GNNs primarily relied on invariant geometric quantities to construct transformation-invariant representations. SchNet~\citep{schnet}, for example, uses pairwise interatomic distances in continuous-filter convolutions, while DimeNet~\citep{dimenet}, GemNet~\citep{gemnet}, and SphereNet~\citep{spherenet} progressively incorporate angular and torsional information to capture higher-order geometric structure. Although these approaches are computationally efficient, their representations remain invariant and therefore do not explicitly retain orientation-dependent information.
+
+Equivariant architectures address this limitation by allowing features to transform according to the underlying symmetry group. $E(n)$-Equivariant Graph Neural Networks (EGNN)~\citep{egnn}, for instance, construct equivariant coordinate updates from invariant pairwise distances, providing an efficient mechanism for modeling geometric transformations without explicitly manipulating higher-order representations. Vectorial approaches such as PaiNN~\citep{schutt2021equivariant} extend this idea by maintaining both scalar and vector features and explicitly modeling their interactions. These methods provide a more direct representation of directional information while preserving the efficiency of local message passing. However, their geometric representations and interaction rules remain restricted to specific feature types, making it less straightforward to uniformly represent and combine diverse geometric quantities and higher-order interactions.
+
+A more general approach is provided by \textit{steerable} architectures, which represent features according to irreducible representations of rotation groups and use spherical harmonics to construct equivariant interactions. Frameworks such as Tensor Field Networks~\citep{tfn} and SE(3)-Transformers~\citep{se3Transformer} established this approach for geometric message passing, while subsequent architectures including Equiformer~\citep{equiformer}, SEGNN~\citep{segnn}, MACE~\citep{mace}, and Allegro~\citep{allegro} have demonstrated its effectiveness in physical and molecular learning problems. These methods offer a systematic mechanism for representing higher-order geometric information. However, their interaction rules typically require coupling different representation types through operations such as tensor products and Clebsch--Gordan decompositions. The resulting computational and implementation complexity can become substantial as the maximum representation order increases.
+
+\noindent\textbf{Local Canonicalization.}
+An alternative approach to geometric equivariance is \emph{local canonicalization}~\citep{loca,lloca,clofnet}, where each node is assigned a local reference frame and geometric features are expressed relative to that frame. \citet{loca} introduced this framework for Euclidean spaces, while \citet{lloca} extended it to Lorentz-equivariant settings. Although local canonicalization provides a flexible and architecture-agnostic mechanism for handling geometric transformations, it requires an additional frame-construction or frame-prediction step and may suffer from optimization difficulties. In contrast, PGA-GNN does not construct or learn local reference frames; geometric relations are represented intrinsically through PGA multivectors and their geometric products, making equivariance a consequence of the underlying algebraic operations rather than an explicit canonicalization procedure.
+
+\noindent\textbf{Geometric Algebra for Geometric Deep Learning.}
+Geometric (Clifford) algebra provides an alternative mathematical framework in which multiple geometric objects and their interactions can be represented within a single algebraic structure. In particular, the geometric product combines inner- and outer-product interactions and therefore provides access to both metric and oriented geometric information through a unified operation. This has motivated several geometric-algebra-based neural architectures, including GCAN~\citep{gcan}, CGENN~\citep{cgenn}, and related approaches for molecular learning~\citep{qm9gagnn}. These models demonstrate that geometric algebra can provide expressive geometric representations while avoiding some of the explicit representation bookkeeping required by conventional irreducible-representation approaches.
+
+A key limitation of Euclidean geometric algebra, however, is its treatment of translations. Standard Euclidean Clifford algebras naturally describe rotations and reflections but do not represent translations as orthogonal transformations within the same vector space. Consequently, architectures based directly on Euclidean geometric algebra typically require additional mechanisms to obtain full $E(3)$ equivariance. This distinction is important for learning problems in which the absolute choice of origin should have no effect on the model output.
+
+\noindent\textbf{Projective Geometric Algebra and Global Attention.}
+Projective Geometric Algebra (PGA) addresses this limitation by embedding Euclidean geometry into a homogeneous algebraic space, allowing translations, rotations, and reflections to be represented within a unified framework. In particular, the PGA $\mathcal{G}_{3,0,1}$ provides an origin-independent representation of Euclidean geometric entities and enables Euclidean transformations to be handled intrinsically through algebraic operations.
+
+The Geometric Algebra Transformer \citep[GATr;][]{gatr} demonstrated the potential of PGA for equivariant deep learning by representing features as PGA multivectors and constructing equivariant transformer operations directly in the algebra. This formulation provides a unified treatment of geometric quantities while maintaining strict $E(3)$ equivariance. However, GATr follows a transformer-style architecture in which interactions are formed through global self-attention across bare node multivectors. In particular, standard GATr does not ingest explicit geometric or physical edge attributes (such as bond vectors or interaction potentials).
+
+\noindent\textbf{Pairwise Geometric Products and Clifford Frame Attention.}
+Pairwise geometric-algebra interactions have also been explored in other domains. Notably, \citet{gafl} introduced Clifford Frame Attention (CFA) within GAFL for protein structure generation. In CFA, pairwise geometric products between residue representations are computed, and the bilinearity of the Clifford product is exploited to move product evaluation outside neighborhood aggregation. However, GAFL relies on local residue reference frames (canonicalized protein backbone coordinate systems) and evaluates interactions between transformed local frames. In contrast, PGA-GNN operates on general geometric graphs without requiring local frame construction, representing all nodes within a unified projective space $\mathcal{G}_{3,0,1}$. Moreover, PGA-GNN introduces an edge-conditioned message-passing framework: directed edges carry both geometric multivector features $\mathbf{E}_{ij}$ (constructed via the equivariant join) and scalar physical attributes $\mathbf{e}_{ij}$ (such as spring constants, interaction types, or radial basis expansions), coupled with a parallel scalar message track.
+
+\noindent\textbf{From Global PGA Transformers to Edge-Conditioned Geometric Message Passing.}
+Our work bridges the algebraic representations of PGA with edge-conditioned graph message passing. Rather than treating all geometric entities as globally interacting tokens without edge attributes, \textsc{PGA-GNN} defines geometric message passing over graph edges. The geometric product is used as an intrinsic algebraic mechanism for combining PGA-valued node features and explicit edge attributes, while a parallel scalar stream propagates physical invariants. Bilinear distributivity allows the neighborhood geometric aggregation to factorize before product evaluation, executing multivector products once per node rather than once per edge. This yields a unified architecture that combines (i) the origin-free representation of PGA, (ii) intrinsic geometric interactions provided by the geometric product and equivariant join, (iii) explicit physical and scalar edge conditioning, and (iv) the sparse topological inductive bias of graph neural networks.
+\section{Mathematical Preliminaries: Symmetries, Equivariance, and Projective Geometric Algebra}
+\label{sec:preliminaries}
+\label{sec:pga_primer}
+
+To establish a rigorous mathematical foundation and make this work self-contained, we begin by reviewing the algebraic formulations of symmetry groups, group actions, and equivariance in 3D geometric deep learning. For a comprehensive primer on 3D Plane-based Projective Geometric Algebra (PGA), we refer the reader to \citet{pga4cs2020,Roelfs_2023}.
+
+\subsection{Groups, Group Actions, and Equivariance}
+\label{subsec:groups_equivariance}
+
+We formulate the basic algebraic structures underlying physical symmetries and geometric deep learning.
+
+\begin{definition}[Symmetry Groups and the Euclidean Group $E(3)$]
+\label{def:group}
+A \emph{group} $(G, \cdot)$ is a set $G$ equipped with an associative binary operation $\cdot: G \times G \to G$, an identity element $e \in G$ satisfying $e \cdot g = g \cdot e = g$, and an inverse element $g^{-1} \in G$ such that $g \cdot g^{-1} = g^{-1} \cdot g = e$ for all $g \in G$.
+
+In 3D Euclidean geometry and physical modeling, the primary symmetry group is the \emph{Euclidean group} $E(3) = O(3) \ltimes \mathbb{R}^3$, representing all distance-preserving transformations (isometries) of 3D Euclidean space $\mathbb{R}^3$. Any isometry $g \in E(3)$ is uniquely parameterized as a pair $(R, \mathbf{t})$, where $R \in O(3) = \{R \in \mathbb{R}^{3 \times 3} \mid R^\top R = I_3\}$ is an orthogonal transformation (capturing 3D rotations and reflections) and $\mathbf{t} \in \mathbb{R}^3$ is a spatial translation vector. The group composition law is given by $(R_1, \mathbf{t}_1) \cdot (R_2, \mathbf{t}_2) = (R_1 R_2, R_1 \mathbf{t}_2 + \mathbf{t}_1)$. The subgroup of orientation-preserving rigid-body motions ($\det(R) = +1$) forms the \emph{special Euclidean group} $SE(3) = SO(3) \ltimes \mathbb{R}^3$, while transformations with $\det(R) = -1$ encompass spatial reflections (parity inversions).
+\end{definition}
+
+\begin{definition}[Group Action and Linear Group Representation]
+\label{def:group_action}
+Let $G$ be a group and $\mathcal{X}$ a non-empty set. A (left) \emph{group action} of $G$ on $\mathcal{X}$ is a mapping $\triangleright: G \times \mathcal{X} \to \mathcal{X}$, written $(g, x) \mapsto g \triangleright x$, satisfying:
+\begin{enumerate}
+    \item \textbf{Identity:} $e \triangleright x = x$ for all $x \in \mathcal{X}$;
+    \item \textbf{Compatibility:} $g \triangleright (h \triangleright x) = (g \cdot h) \triangleright x$ for all $g, h \in G$ and $x \in \mathcal{X}$.
+\end{enumerate}
+When $\mathcal{X}$ is a real vector space $\mathcal{V}$, a \emph{linear group representation} is a group homomorphism $\rho: G \to \mathrm{GL}(\mathcal{V})$, where $\mathrm{GL}(\mathcal{V})$ denotes the general linear group of invertible linear transformations on $\mathcal{V}$. The homomorphism preserves group multiplication $\rho(g \cdot h) = \rho(g)\rho(h)$ with $\rho(e) = \mathrm{id}_{\mathcal{V}}$, and the corresponding group action on a vector $v \in \mathcal{V}$ is given by the linear map $\rho(g)v$.
+
+In standard Cartesian coordinates, an isometry $g = (R, \mathbf{t}) \in E(3)$ acts on point positions $\mathbf{p} \in \mathbb{R}^3$ via the affine action $g \triangleright \mathbf{p} = R\mathbf{p} + \mathbf{t}$, and on directional vectors (such as relative displacements, velocities $\mathbf{v} \in \mathbb{R}^3$, or forces $\mathbf{F} \in \mathbb{R}^3$) via the linear representation $g \triangleright \mathbf{v} = R\mathbf{v}$.
+\end{definition}
+
+\begin{definition}[Equivariance and Invariance]
+\label{def:equivariance}
+Let $G$ be a symmetry group acting on vector spaces $\mathcal{X}$ and $\mathcal{Y}$ via linear representations $\rho_{\mathcal{X}}$ and $\rho_{\mathcal{Y}}$, respectively.
+\begin{enumerate}
+    \item A function $f: \mathcal{X} \to \mathcal{Y}$ is \textbf{$G$-equivariant} if it commutes with the group action for all transformations $g \in G$:
+    \begin{equation}
+        f(\rho_{\mathcal{X}}(g) x) = \rho_{\mathcal{Y}}(g) f(x), \quad \forall g \in G, \; \forall x \in \mathcal{X}.
+    \end{equation}
+    \item A function $f: \mathcal{X} \to \mathcal{Y}$ is \textbf{$G$-invariant} if its output is unaffected by transformations of the input:
+    \begin{equation}
+        f(\rho_{\mathcal{X}}(g) x) = f(x), \quad \forall g \in G, \; \forall x \in \mathcal{X},
+    \end{equation}
+    which is the special case of equivariance where $\rho_{\mathcal{Y}}$ is the trivial representation ($\rho_{\mathcal{Y}}(g) = \mathrm{id}_{\mathcal{Y}}$ for all $g \in G$).
+\end{enumerate}
+\end{definition}
+
+In 3D physical modeling, physical laws are independent of the arbitrary choice of coordinate system. For instance, predicting future atomic velocities or physical forces requires an $E(3)$-equivariant model ($f(R\mathbf{p} + \mathbf{t}) = R f(\mathbf{p})$), while predicting scalar potential energies or quantum chemical properties requires an $E(3)$-invariant model ($f(R\mathbf{p} + \mathbf{t}) = f(\mathbf{p})$).
+
+However, standard Euclidean vector representations cannot linearize translations ($\mathbf{p} \mapsto R\mathbf{p} + \mathbf{t}$ is affine rather than linear). Consequently, steerable methods based on irreducible representations ($SO(3)$ spherical harmonics) must isolate a coordinate origin and process radial translations through separate invariant scalar tracks. Projective Geometric Algebra resolves this bottleneck by projectively linearizing the entire $E(3)$ group into a single linear multivector space.
+
+\subsection{Generators and Graded Multivector Space}
+\label{subsec:pga_generators}
+
+Geometric (Clifford) Algebra offers a coordinate-free language unifying geometric entities and continuous spatial transformations into a single associative algebra. 3D Projective Geometric Algebra $\mathcal{G}_{3,0,1}$ is generated by four orthonormal basis vectors: three Euclidean spatial directions $\{\mathbf{e}_1, \mathbf{e}_2, \mathbf{e}_3\}$ and one degenerate (ideal) basis vector $\mathbf{e}_0$. The algebra signature $(p, q, r) = (3, 0, 1)$ is defined by the quadratic relations:
+\begin{equation}
+    \mathbf{e}_1^2 = \mathbf{e}_2^2 = \mathbf{e}_3^2 = 1, \quad \mathbf{e}_0^2 = 0, \quad \text{and} \quad \mathbf{e}_i \mathbf{e}_j = -\mathbf{e}_j \mathbf{e}_i \quad (\forall i \neq j).
+\end{equation}
+The degenerate basis vector $\mathbf{e}_0$ squares to zero and algebraically represents the ideal plane at infinity in homogeneous projective space $\mathbb{R}\mathrm{P}^3$. 
+
+The complete algebra $\mathcal{G}_{3,0,1}$ is a $2^4 = 16$-dimensional graded linear space. Throughout this paper and our implementation, we adopt the canonical 16-element basis ordered by grade (see Appendix~\ref{app:pga_reference} for the complete blade enumeration in Table~\ref{tab:basis_enumeration} and the full $16 \times 16$ Cayley multiplication table in Table~\ref{tab:cayley}):
+\begin{equation}
+    \mathcal{B} = \big( 1,\, \mathbf{e}_0,\, \mathbf{e}_1,\, \mathbf{e}_2,\, \mathbf{e}_3,\, \mathbf{e}_{01},\, \mathbf{e}_{02},\, \mathbf{e}_{03},\, \mathbf{e}_{12},\, \mathbf{e}_{13},\, \mathbf{e}_{23},\, \mathbf{e}_{012},\, \mathbf{e}_{013},\, \mathbf{e}_{023},\, \mathbf{e}_{123},\, \mathbf{e}_{0123} \big),
+    \label{eq:basis_order}
+\end{equation}
+which decomposes $\mathcal{G}_{3,0,1} = \bigoplus_{k=0}^4 \langle \mathcal{G}_{3,0,1} \rangle_k$ into five homogeneous grade-$k$ subspaces:
+\begin{itemize}
+    \item \textbf{Grade 0 (1 Scalar):} $\langle \mathcal{G}_{3,0,1} \rangle_0 = \mathrm{span}\{1\}$, representing coordinate-free scalar quantities (mass, charge, attention weights).
+    \item \textbf{Grade 1 (4 Vectors / Planes):} $\langle \mathcal{G}_{3,0,1} \rangle_1 = \mathrm{span}\{\mathbf{e}_0, \mathbf{e}_1, \mathbf{e}_2, \mathbf{e}_3\}$, representing geometric planes.
+    \item \textbf{Grade 2 (6 Bivectors / Lines):} $\langle \mathcal{G}_{3,0,1} \rangle_2 = \mathrm{span}\{\mathbf{e}_{01}, \mathbf{e}_{02}, \mathbf{e}_{03}, \mathbf{e}_{12}, \mathbf{e}_{13}, \mathbf{e}_{23}\}$, representing Plücker lines, linear velocities, and angular momenta.
+    \item \textbf{Grade 3 (4 Trivectors / Points):} $\langle \mathcal{G}_{3,0,1} \rangle_3 = \mathrm{span}\{\mathbf{e}_{012}, \mathbf{e}_{013}, \mathbf{e}_{023}, \mathbf{e}_{123}\}$, representing 3D spatial points.
+    \item \textbf{Grade 4 (1 Pseudoscalar / Volume):} $\langle \mathcal{G}_{3,0,1} \rangle_4 = \mathrm{span}\{\mathbf{e}_{0123}\}$, representing oriented 4D projective pseudoscalars and volumetric elements.
+\end{itemize}
+Here, the multi-index notation $\mathbf{e}_{ijk} = \mathbf{e}_i \mathbf{e}_j \mathbf{e}_k$ denotes the basis blades. A general \emph{multivector} $\mathbf{X} \in \mathcal{G}_{3,0,1}$ is a linear combination across all 16 basis blades, written as $\mathbf{X} = \sum_{k=0}^4 \langle \mathbf{X} \rangle_k$, where $\langle \cdot \rangle_k$ denotes the canonical grade projection operator onto $\langle \mathcal{G}_{3,0,1} \rangle_k$.
+
+\subsection{Algebraic Operations, Involutions, and Invariant Norms}
+\label{subsec:pga_ops}
+
+The foundational algebraic operation in PGA is the associative and distributive \emph{geometric product}. For any two multivectors $\mathbf{A}, \mathbf{B} \in \mathcal{G}_{3,0,1}$, their geometric product $\mathbf{A}\mathbf{B}$ simultaneously captures metric and incidence relationships. For two 1-vectors $\mathbf{u}, \mathbf{v} \in \langle \mathcal{G}_{3,0,1} \rangle_1$, the geometric product decomposes into the symmetric inner product and antisymmetric outer (wedge) product:
+\begin{equation}
+    \mathbf{u}\mathbf{v} = \mathbf{u} \cdot \mathbf{v} + \mathbf{u} \wedge \mathbf{v}, \quad \text{with} \quad \mathbf{u} \cdot \mathbf{v} = \frac{1}{2}(\mathbf{u}\mathbf{v} + \mathbf{v}\mathbf{u}) \in \langle \mathcal{G}_{3,0,1} \rangle_0, \quad \mathbf{u} \wedge \mathbf{v} = \frac{1}{2}(\mathbf{u}\mathbf{v} - \mathbf{v}\mathbf{u}) \in \langle \mathcal{G}_{3,0,1} \rangle_2.
+\end{equation}
+The inner product $\mathbf{u} \cdot \mathbf{v}$ yields scalar distance and angular projections, while the wedge product $\mathbf{u} \wedge \mathbf{v}$ constructs higher-grade multivectors that geometrically represent subspace intersections (the \emph{meet} operation).
+
+\noindent\textbf{Involutions, Reversion, and Invariant Geometric Norm.}
+The algebra $\mathcal{G}_{3,0,1}$ possesses canonical linear involutions:
+\begin{enumerate}
+    \item The \emph{grade involution} (main involution) $\widehat{\cdot}$ flips the sign of odd-grade elements: $\widehat{\mathbf{X}} = \sum_{k=0}^4 (-1)^k \langle \mathbf{X} \rangle_k$, satisfying $\widehat{\mathbf{A}\mathbf{B}} = \widehat{\mathbf{A}}\widehat{\mathbf{B}}$.
+    \item The \emph{reversion} anti-automorphism $\widetilde{\cdot}$ reverses the order of vector factors: for any homogeneous blade $\mathbf{A} = \mathbf{u}_1 \wedge \dots \wedge \mathbf{u}_k$, $\widetilde{\mathbf{A}} = \mathbf{u}_k \wedge \dots \wedge \mathbf{u}_1 = (-1)^{k(k-1)/2} \mathbf{A}$, satisfying $\widetilde{\mathbf{A}\mathbf{B}} = \widetilde{\mathbf{B}}\widetilde{\mathbf{A}}$.
+\end{enumerate}
+The scalar part of the geometric product with the reverse, $\langle \widetilde{\mathbf{A}} \mathbf{B} \rangle_0$, defines an invariant bilinear form. For any multivector $\mathbf{X} \in \mathcal{G}_{3,0,1}$, the Euclidean (geometric) norm is defined as:
+\begin{equation}
+    \|\mathbf{X}\|_0 = \sqrt{\langle \widetilde{\mathbf{X}} \mathbf{X} \rangle_0}.
+    \label{eq:pga_norm}
+\end{equation}
+Because the degenerate basis vector satisfies $\mathbf{e}_0^2 = 0$, all ideal basis blades containing $\mathbf{e}_0$ square to zero in the scalar grade-0 projection ($\langle \widetilde{\mathbf{e}}_{0\dots} \mathbf{e}_{0\dots} \rangle_0 = 0$). Consequently, exactly the 8 Euclidean basis blades $\{1, \mathbf{e}_1, \mathbf{e}_2, \mathbf{e}_3, \mathbf{e}_{12}, \mathbf{e}_{13}, \mathbf{e}_{23}, \mathbf{e}_{123}\}$ contribute to $\|\mathbf{X}\|_0$. This makes $\|\mathbf{X}\|_0$ strictly invariant to translations and all $E(3)$ isometries, providing the mathematical basis for equivariant layer normalization and invariant attention scaling.
+
+\noindent\textbf{Poincaré Duality and the Equivariant Join Operation ($\vee$).}
+In projective geometric algebra, geometric incidence operations dualize between subspace intersection (\emph{meet}, $\wedge$) and subspace span (\emph{join}, $\vee$). Because the pseudoscalar element $I = \mathbf{e}_{0123}$ satisfies $I^2 = 0$ in $\mathcal{G}_{3,0,1}$, algebraic duality is defined via the linear Poincaré / Hodge dual operator $J: \langle \mathcal{G}_{3,0,1} \rangle_k \to \langle \mathcal{G}_{3,0,1} \rangle_{4-k}$ that maps each canonical basis blade $\mathbf{e}_A$ to its complementary blade $\mathbf{e}_{\bar{A}}$ such that $\mathbf{e}_A \wedge J(\mathbf{e}_A) = I$. 
+The \emph{regressive product} (or \emph{join}) $\vee$ of two multivectors $\mathbf{A}, \mathbf{B}$ is defined via duality:
+\begin{equation}
+    \mathbf{A} \vee \mathbf{B} = J^{-1}\big( J(\mathbf{A}) \wedge J(\mathbf{B}) \big).
+    \label{eq:join_def}
+\end{equation}
+While the meet $\mathbf{P}_1 \wedge \mathbf{P}_2$ computes the intersection of two grade-1 planes into a grade-2 line, the join $\mathbf{X}_i \vee \mathbf{X}_j$ spans the line connecting two grade-3 points. For two points $\mathbf{X}_{\mathbf{p}_i}, \mathbf{X}_{\mathbf{p}_j} \in \langle \mathcal{G}_{3,0,1} \rangle_3$ defined as in Eq.~\ref{eq:point_repr}, their join evaluates directly to the Plücker line:
+\begin{align}
+    \mathbf{X}_{\mathbf{p}_i} \vee \mathbf{X}_{\mathbf{p}_j} 
+    &= (\mathbf{p}_j - \mathbf{p}_i)_x \mathbf{e}_{23} - (\mathbf{p}_j - \mathbf{p}_i)_y \mathbf{e}_{13} + (\mathbf{p}_j - \mathbf{p}_i)_z \mathbf{e}_{12} + \sum_{k=1}^3 (\mathbf{p}_i \times \mathbf{p}_j)_k \mathbf{e}_{0k} \nonumber \\
+    &= (\mathbf{p}_j - \mathbf{p}_i) \mathbf{e}_{123} + \mathbf{e}_0 (\mathbf{p}_i \times \mathbf{p}_j) \in \langle \mathcal{G}_{3,0,1} \rangle_2,
+    \label{eq:join_coords}
+\end{align}
+which simultaneously and origin-independently encodes the relative displacement vector $\mathbf{p}_j - \mathbf{p}_i$ in the Euclidean direction bivector and the moment $\mathbf{p}_i \times \mathbf{p}_j$ in the ideal bivector. In our message-passing architecture, this join natively serves as the equivariant geometric edge representation.
+
+\subsection{Geometric Primitive Representation}
+\label{subsec:pga_primitives}
+
+In Plane-based PGA, geometric entities in 3D Euclidean space are represented projectively:
+\begin{itemize}
+    \item \textbf{Planes (Grade 1):} A plane with unit normal $\mathbf{n} = (n_x, n_y, n_z)^\top$ and signed distance $d$ from the origin ($\mathbf{n} \cdot \mathbf{p} + d = 0$) is represented by the 1-vector:
+    \begin{equation}
+        \mathbf{P} = n_x \mathbf{e}_1 + n_y \mathbf{e}_2 + n_z \mathbf{e}_3 + d \mathbf{e}_0.
+    \end{equation}
+
+    \item \textbf{Lines (Grade 2):} The intersection (meet) of two planes $\mathbf{P}_1 \wedge \mathbf{P}_2$ yields a 2-blade $\mathbf{L} \in \langle \mathcal{G}_{3,0,1} \rangle_2$, directly encoding the 6 Plücker coordinates of a directed 3D line. It decomposes into a Euclidean direction blade $\mathbf{d}$ and an ideal moment blade $\mathbf{m}$:
+    \begin{equation}
+        \mathbf{L} = \underbrace{d_x \mathbf{e}_{23} - d_y \mathbf{e}_{13} + d_z \mathbf{e}_{12}}_{\text{Euclidean Direction } \mathbf{d}} + \underbrace{m_x \mathbf{e}_{01} + m_y \mathbf{e}_{02} + m_z \mathbf{e}_{03}}_{\text{Ideal Moment } \mathbf{m}}.
+    \end{equation}
+    A line with $\mathbf{d} \neq 0$ is a Euclidean line, whereas a line with $\mathbf{d} = 0$ is an ideal line at infinity. A Euclidean line is a unit Euclidean line if its direction has unit Euclidean norm ($\|\mathbf{d}\|_0 = \sqrt{d_x^2 + d_y^2 + d_z^2} = 1$). For any unit Euclidean line passing through 3D space ($\mathbf{d} \cdot \mathbf{m} = 0$), its geometric square satisfies $\mathbf{l}^2 = -1$, allowing it to serve as the bivector generator for spatial rotations.
+
+    \item \textbf{Points (Grade 3):} A 3D point with Cartesian coordinates $\mathbf{p} = (x, y, z)^\top$ is defined as the intersection of three coordinate planes $(\mathbf{e}_1 - x\mathbf{e}_0) \wedge (\mathbf{e}_2 - y\mathbf{e}_0) \wedge (\mathbf{e}_3 - z\mathbf{e}_0)$, represented as the trivector:
+    \begin{equation}
+        \mathbf{X}_{\mathbf{p}} = \mathbf{e}_{123} - x \mathbf{e}_{023} + y \mathbf{e}_{013} - z \mathbf{e}_{012}.
+        \label{eq:point_repr}
+    \end{equation}
+    The component $\mathbf{e}_{123}$ acts as the homogeneous coordinate ($w=1$), guaranteeing that positions are encoded origin-free. The alternating signs reflect the anticommutation of basis vectors when expanding the wedge product into the ordered basis $\mathcal{B}$ in Eq.~\ref{eq:basis_order}.
+\end{itemize}
+
+\subsection{Continuous E(3) Symmetries and Versor Group Action}
+\label{subsec:pga_versors}
+
+A decisive advantage of $\mathcal{G}_{3,0,1}$ is that all continuous Euclidean isometries $E(3) = O(3) \ltimes \mathbb{R}^3$ (rotations, translations, and reflections) are represented uniformly as algebraic elements called \emph{versors} (or \emph{motors} for rigid motions in $SE(3)$).
+\begin{itemize}
+    \item \textbf{Rotors (Rotations):} A rotation by angle $\theta$ around a unit Euclidean line $\mathbf{l} \in \langle \mathcal{G}_{3,0,1} \rangle_2$ ($\mathbf{l}^2 = -1$) is generated by the even multivector:
+    \begin{equation}
+        R = \exp\left(-\frac{\theta}{2} \mathbf{l}\right) = \cos\left(\frac{\theta}{2}\right) - \sin\left(\frac{\theta}{2}\right) \mathbf{l}.
+    \end{equation}
+
+    \item \textbf{Translators (Translations):} A translation by displacement vector $\mathbf{t} = (t_x, t_y, t_z)^\top$ is generated by the ideal line $\mathbf{t}_\infty = t_x \mathbf{e}_{01} + t_y \mathbf{e}_{02} + t_z \mathbf{e}_{03}$ (where $\mathbf{t}_\infty^2 = 0$):
+    \begin{equation}
+        T = \exp\left(-\frac{1}{2} \mathbf{t}_\infty\right) = 1 - \frac{1}{2}\mathbf{t}_\infty = 1 - \frac{1}{2} (t_x \mathbf{e}_{01} + t_y \mathbf{e}_{02} + t_z \mathbf{e}_{03}).
+    \end{equation}
+
+    \item \textbf{Motors (Rigid Motions):} By Chasles' theorem, any rigid body displacement in $SE(3)$ is a composition of a rotation and a translation, represented by a motor $M = TR \in \mathcal{G}_{3,0,1}^+$, satisfying the strict normalization condition $M \widetilde{M} = 1$.
+\end{itemize}
+
+Formally, normalized versors form the \emph{Pin group} $\mathrm{Pin}(3,0,1) = \{V \in \mathcal{G}_{3,0,1} \mid V = \mathbf{u}_1 \dots \mathbf{u}_k, \, \mathbf{u}_i \in \langle \mathcal{G}_{3,0,1} \rangle_1, \, V\widetilde{V}=1\}$, which provides a double cover of the Euclidean group $E(3)$ ($\mathrm{Pin}(3,0,1) \twoheadrightarrow E(3)$). The subgroup of even versors forms the \emph{Spin group} $\mathrm{Spin}^+(3,0,1) \twoheadrightarrow SE(3)$.
+
+The linear group representation $\rho: \mathrm{Pin}(3,0,1) \to \mathrm{GL}(\mathcal{G}_{3,0,1})$ acts on any geometric multivector $\mathbf{X} \in \mathcal{G}_{3,0,1}$ via the two-sided twisted adjoint (sandwich) action:
+\begin{equation}
+    \rho_V(\mathbf{X}) = 
+    \begin{cases} 
+      V \mathbf{X} V^{-1} = V \mathbf{X} \widetilde{V} & \text{if } V \text{ is even (rotations, translations in } SE(3)\text{)}, \\
+      V \widehat{\mathbf{X}} V^{-1} = V \widehat{\mathbf{X}} \widetilde{V} & \text{if } V \text{ is odd (reflections in } E(3) \setminus SE(3)\text{)},
+   \end{cases}
+   \label{eq:versor_action}
+\end{equation}
+where $\widehat{\mathbf{X}}$ is the grade involution. 
+
+Crucially, this versor group representation satisfies three fundamental properties:
+\begin{enumerate}
+    \item \textbf{Homomorphism:} $\rho_{V_1 V_2}(\mathbf{X}) = \rho_{V_1}(\rho_{V_2}(\mathbf{X}))$ and $\rho_{\mathbf{1}}(\mathbf{X}) = \mathbf{X}$;
+    \item \textbf{Grade Preservation:} $\langle \rho_V(\mathbf{X}) \rangle_k = \rho_V(\langle \mathbf{X} \rangle_k)$ for each grade $k \in \{0, \dots, 4\}$, and $\rho_V(\mathbf{e}_0) = \mathbf{e}_0$;
+    \item \textbf{Algebraic Homomorphism:} $\rho_V(\mathbf{A}\mathbf{B}) = \rho_V(\mathbf{A})\rho_V(\mathbf{B})$ and $\|\rho_V(\mathbf{X})\|_0 = \|\mathbf{X}\|_0$.
+\end{enumerate}
+Because the sandwich action acts uniformly and linearly across all grades, PGA naturally unifies 3D rotations, translations, and reflections within a single closed algebraic system, avoiding Clebsch--Gordan decompositions, origin tracking, or calculating inverse-transpose matrices for covariant versus contravariant features.
+
+\section{Geometric Algebra Message Passing}
+\label{sec:method}
+
+We introduce the \emph{Projective Geometric Algebra Graph Neural Network (PGA-GNN)}, an equivariant message-passing architecture. 
+The central idea is to define interactions between nodes using the \emph{geometric product}. This provides a principled mechanism for explicitly modeling spatial relationships while simultaneously propagating non-geometric features through a coupled scalar track, as shown in Figure~\ref{fig:mpb}.
+
+To support arbitrary spatial configurations and continuous translations without a fixed origin, PGA-GNN operates within \emph{Plane-based Geometric Algebra (PGA)} \citep{pga4cs2020}. 
+Specifically, we use the algebra $\mathcal{G}_{3,0,1}$, which introduces a degenerate basis vector $\mathbf{e}_0$ ($\mathbf{e}_0^2 = 0$). In this framework, geometric entities (points, lines, planes) and $E(3)$ transformations (rotations and translations) are uniformly represented as 16-dimensional multivectors.
+
+\subsection{Hybrid Node and Edge Representations}
+\label{subsec:repr}
+
+Real-world geometric graphs (e.g., molecules, physical systems) contain both spatial and invariant information. To capture this, PGA-GNN operates on a hybrid feature space. Each node $i$ is associated with a dual representation:
+\begin{itemize}
+    \item A geometric multivector feature $\mathbf{X}_i \in \mathbb{R}^{C \times 16}$, where $C$ is the number of channels. This encodes spatial entities like positions, velocities, and orientations.
+    \item A non-geometric scalar feature $\mathbf{x}_i \in \mathbb{R}^{S}$, encoding invariant properties like node types, charges, or masses.
+\end{itemize}
+Similarly, directed edges from node $j$ to node $i$ can possess both geometric multivector features $\mathbf{E}_{ij} \in \mathbb{R}^{C_E \times 16}$ and scalar features $\mathbf{e}_{ij} \in \mathbb{R}^{S_E}$ (e.g., bond types or radial basis function expansions of distances). Geometric edge features are constructed via the \emph{equivariant join} $\mathbf{E}_{ij} = \mathrm{EquiJoin}(\mathbf{X}_i, \mathbf{X}_j) = z_{\text{ref}} (\mathbf{X}_i \vee \mathbf{X}_j)$ \citep{gatr}, where $z_{\text{ref}} = \langle \mathbf{Z}_{\text{ref}} \rangle_{123} \in \mathbb{R}$ is the Euclidean orientation scalar extracted from the reference multivector $\mathbf{Z}_{\text{ref}}$ (computed dynamically as the graph-level multivector mean $\frac{1}{N}\sum_k \mathbf{X}_k$). In canonical coordinates, $z_{\text{ref}} = 1$, connecting two position trivectors into a directed line segment (grade-2 bivector). Under spatial reflections ($\det = -1$), $z_{\text{ref}}$ flips sign in tandem with the pseudo-multivector join $\mathbf{X}_i \vee \mathbf{X}_j$, rigorously cancelling parity inversion to ensure strict $E(3)$ reflection equivariance (see Lemma~\ref{lem:join_equivariance} in Appendix~\ref{app:proofs}).
+
+\subsection{Geometric Message Construction}
+\label{subsec:message}
+
+A fundamental design choice in PGA-GNN is the explicit definition of spatial messages natively encoding relative transformations between entities. 
+Given a target node $i$ and a neighboring node $j$ with respective equivariant linear projections $\mathbf{H}_i, \mathbf{H}_j \in \mathbb{R}^{C \times 16}$, the core spatial interaction is computed using the associative \emph{geometric product} applied channel-wise: $\mathbf{H}_i \mathbf{H}_j$, where $(\mathbf{H}_i \mathbf{H}_j)_c = \mathbf{H}_{i,c} \mathbf{H}_{j,c}$ for each channel $c \in \{1, \dots, C\}$.
+
+\noindent
+\textbf{Intuition and Properties of the Geometric Product:} 
+Applied independently across channels, the geometric product $\mathbf{A} \mathbf{B}$ combines inner (metric) and outer (incidence) interactions into a single associative operation. 
+For two multivectors $\mathbf{A}$ and $\mathbf{B}$ (each a linear combination of the 16 basis blades), their product $\mathbf{A} \mathbf{B}$ simultaneously captures both the relative distance (via the scalar/inner part) and the relative orientation and subspace span (via the bivector and higher-grade parts) between neighboring nodes. 
+Unlike standard neural network layers that concatenate feature vectors into unconstrained MLPs, the geometric product strictly preserves the graded algebraic structure and commutes with versor group transformations, which is fundamental to guaranteeing exact $E(3)$ equivariance.
+
+\noindent
+To enrich this interaction, geometric edge attributes modulate the message through an equivariant linear projection. Following \citet{gatr}, any linear mapping $\Phi: \mathcal{G}_{3,0,1} \to \mathcal{G}_{3,0,1}$ equivariant under the PGA versor group action decomposes into grade-preserving and $\mathbf{e}_0$-modulated grade-raising terms:
+\begin{equation}
+    \mathrm{EquiLinear}(\mathbf{X}) = \sum_{k=0}^{4} \boldsymbol{\Omega}_k \langle \mathbf{X} \rangle_k + \sum_{k=0}^{3} \boldsymbol{\mathcal{N}}_k \mathbf{e}_0 \langle \mathbf{X} \rangle_k,
+    \label{eq:equilinear}
+\end{equation}
+where $\boldsymbol{\Omega}_k \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}}}$ ($k=0,\dots,4$) parameterize 5 independent linear maps acting directly on each grade subspace $\langle \mathcal{G}_{3,0,1} \rangle_k$, and $\boldsymbol{\mathcal{N}}_k \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}}}$ ($k=0,\dots,3$) parameterize 4 grade-raising maps (multiplying grade-$k$ multivectors by the degenerate basis vector $\mathbf{e}_0$). This yields exactly 9 learnable weight matrices per channel mixing, guaranteeing strict equivariance without mixing incompatible geometric representations.
+
+The complete edge-modulated geometric message $\mathbf{M}_{ij}$ and its parallel scalar counterpart $\mathbf{m}_{ij}$ are formulated as:
+\begin{align}
+    \mathbf{M}_{ij} &= \mathbf{H}_i \mathbf{H}_j + \mathrm{EquiLinear}_{\text{msg}}(\mathbf{E}_{ij}), \label{eq:msg_geom} \\
+    \mathbf{m}_{ij} &= \mathbf{W}_V \mathbf{h}_j + \mathbf{W}_E \mathbf{e}_{ij},
+\end{align}
+where $\mathbf{W}_V$ and $\mathbf{W}_E$ are learnable weight matrices, and $\mathbf{h}_j$ is a linear projection of the scalar node feature $\mathbf{x}_j$. This dual-track structure ensures that the network propagates explicit geometric transformations via the multivector track while maintaining flexible cross-communication for invariant metadata.
+
+\subsection{Edge-Conditioned Invariant Attention}
+\label{subsec:attention}
+
+\noindent
+To adaptively weight neighboring nodes, we compute invariant attention scores from geometric and scalar node features together with edge attributes:
+
+\begin{equation}
+    \alpha_{ij}
+    =
+    \mathrm{softmax}_j
+    \left(
+    \frac{
+        \langle \widetilde{\mathbf{Q}}_i \mathbf{K}_j \rangle_0
+        +
+        \langle \widetilde{\mathbf{Q}}_i \mathbf{E}_{ij}^{K} \rangle_0
+    }
+    {\sqrt{C\cdot 8}}
+    +
+    \frac{
+        \mathbf{q}_i^{\top}\mathbf{k}_j
+        +
+        \mathbf{q}_i^{\top}\mathbf{W}_{E,\mathrm{att}}\mathbf{e}_{ij}
+    }
+    {\sqrt{S}}
+    \right),
+    \label{eq:attention}
+\end{equation}
+
+\noindent
+where $\mathbf{Q}_i=\mathrm{EquiLinear}_Q(\mathbf{X}_i)$, $\mathbf{K}_j=\mathrm{EquiLinear}_K(\mathbf{X}_j)$, $\mathbf{q}_i=\mathbf{W}_Q\mathbf{h}_i$, $\mathbf{k}_j=\mathbf{W}_K\mathbf{h}_j$, $\mathbf{E}_{ij}^{K}=\mathrm{EquiLinear}_E(\mathbf{E}_{ij})$ is the projected geometric edge feature, and $\langle\cdot\rangle_0$ denotes the invariant grade-0 projection (summed across channel dimensions).
+
+\noindent
+In $\mathcal{G}_{3,0,1}$, the geometric grade-0 projection $\langle \cdot \rangle_0$ is the invariant scalar part. 
+However, among the 16 basis blades, only the 8 that do not involve the degenerate vector $\mathbf{e}_0$ contribute to this invariant dot product (the $\mathbf{e}_0$ component has zero geometric norm). 
+Thus, the variance of the geometric attention term scales with $C \cdot 8$, requiring this specific normalization to ensure stable gradients across layers.
+
+\subsection{Full Layer Formulation and Node Update}
+\label{subsec:update}
+
+\noindent
+Messages are attention-weighted and aggregated over the neighborhood:
+\begin{equation}
+    \bar{\mathbf{M}}_i = \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \mathbf{M}_{ij}, \quad \bar{\mathbf{m}}_i = \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \mathbf{m}_{ij}.
+    \label{eq:agg}
+\end{equation}
+
+\noindent\textbf{Computational Factorization via Algebraic Distributivity.}
+A valuable computational property of the geometric product is its strict bilinear distributivity over multivector addition: $\mathbf{A}(\mathbf{B} + \mathbf{C}) = \mathbf{A}\mathbf{B} + \mathbf{A}\mathbf{C}$. 
+Substituting Eq.~\ref{eq:msg_geom} into Eq.~\ref{eq:agg}, the aggregated geometric message factorizes algebraically:
+\begin{align}
+    \bar{\mathbf{M}}_i 
+    &= \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \left( \mathbf{H}_i \mathbf{H}_j + \mathrm{EquiLinear}_{\text{msg}}(\mathbf{E}_{ij}) \right) \nonumber \\
+    &= \mathbf{H}_i \left( \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \mathbf{H}_j \right) + \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \mathrm{EquiLinear}_{\text{msg}}(\mathbf{E}_{ij}).
+    \label{eq:distributivity_factorization}
+\end{align}
+This bilinear factorization allows the network to aggregate the linear projections $\mathbf{H}_j$ across the neighborhood first in $\mathcal{O}(|\mathcal{E}| \cdot C \cdot 16)$, and then execute the $16 \times 16$ geometric product only \emph{once per node} ($N$ times) rather than once per edge ($|\mathcal{E}|$ times). We note that leveraging bilinearity to aggregate multivectors before taking pairwise Clifford products was also introduced by \citet{gafl} in the context of Clifford Frame Attention. In PGA-GNN, this algebraic property is integrated into an edge-conditioned message-passing scheme that combines node-level multivector bilinears with explicit edge multivectors ($\mathbf{E}_{ij}$) and scalar edge features. 
+We note that while this factorization reduces the geometric product evaluations to $\mathcal{O}(N \cdot C \cdot 16^2)$, the total layer complexity still depends on $|\mathcal{E}|$ through attention weight computation, scalar edge encoding, and neighbor scatter-reductions.
+
+\noindent
+These aggregated messages are concatenated with the original node features and passed through an Equivariant Multi-Layer Perceptron ($\mathrm{EquiMLP}$) to update the node states:
+\begin{equation}
+    \mathbf{X}_i^{\text{new}}, \mathbf{x}_i^{\text{new}} = \mathrm{EquiMLP}\left( [\mathbf{X}_i \,\|\, \bar{\mathbf{M}}_i], [\mathbf{x}_i \,\|\, \bar{\mathbf{m}}_i] \right).
+    \label{eq:update}
+\end{equation}
+
+\noindent
+\textbf{Handling non-linearities:} 
+Crucially, standard element-wise non-linearities (like GELU) cannot be applied directly to a 16-dimensional multivector because they would break the algebraic structure and violate equivariance. 
+Inside the $\mathrm{EquiMLP}$, we employ \textbf{Gated Non-linearities}: we isolate the invariant scalar component $\langle \mathbf{X} \rangle_0$, apply the standard activation to it, and use the result to scale the entire multivector, thus safely injecting non-linearity while preserving directional proportions.
+This operation is equivariant because $\langle \mathbf{X} \rangle_0$ is invariant to $E(3)$, and scaling a multivector by an invariant scalar commutes with the sandwich product. 
+Finally, a residual connection and an equivariant layer normalization (scaling based on the invariant geometric norm) yield the final updated features.
+
+\subsection{Task-Specific Readout Heads}
+\label{subsec:readout}
+
+To predict target physical quantities from the updated multivector representations $\mathbf{X}_i^{(L)} \in \mathbb{R}^{C \times 16}$ and scalar features $\mathbf{x}_i^{(L)} \in \mathbb{R}^{S}$ after $L$ message-passing layers, we formulate three task-specific equivariant and invariant readout heads:
+
+\noindent\textbf{1. Coordinate Decoding for Dynamical Systems (N-body and Springs).}
+For physical simulations where the goal is to predict future positions $\hat{\mathbf{p}}_i \in \mathbb{R}^3$, the final layer outputs a single multivector channel ($C=1$). By projectively inverting Eq.~\ref{eq:point_repr}, the predicted Cartesian coordinates are decoded directly from the trivector components:
+\begin{equation}
+    \hat{\mathbf{p}}_i = \mathrm{extract\_point}\left(\mathbf{X}_i^{(L)}\right) = \left( -\frac{\langle \mathbf{X}_i^{(L)} \rangle_{023}}{\langle \mathbf{X}_i^{(L)} \rangle_{123}},\, \frac{\langle \mathbf{X}_i^{(L)} \rangle_{013}}{\langle \mathbf{X}_i^{(L)} \rangle_{123}},\, -\frac{\langle \mathbf{X}_i^{(L)} \rangle_{012}}{\langle \mathbf{X}_i^{(L)} \rangle_{123}} \right)^\top,
+    \label{eq:extract_point}
+\end{equation}
+where $\langle \mathbf{X}_i^{(L)} \rangle_{123}$ serves as the homogeneous projective scale ($w=1$). This extraction commutes strictly with the versor action (see Lemma~\ref{lem:point_readout_equivariance} in Appendix~\ref{app:proofs}), guaranteeing translational and rotational equivariance without requiring intermediate coordinate frame projections.
+
+\noindent\textbf{2. Conservative Energy and Force Prediction (Molecular Dynamics).}
+For molecular systems, predicting forces directly via unconstrained vector outputs can violate the conservation of energy (non-zero curl). To strictly guarantee energy conservation, we compute physical forces as analytical negative gradients of the predicted potential energy: $\hat{\mathbf{F}}_i = -\nabla_{\mathbf{p}_i} E$.
+We first predict local atomic energies $e_i$ from the invariant scalar part of the multivector track $\langle \mathbf{X}_i^{(L)} \rangle_0$ and the scalar track $\mathbf{x}_i^{(L)}$ via an atomic Multi-Layer Perceptron:
+\begin{equation}
+    e_i = \mathrm{MLP}_{\text{atom}}\left( [\langle \mathbf{X}_i^{(L)} \rangle_0 \,\|\, \mathbf{x}_i^{(L)}] \right), \quad E = \sum_{i=1}^{N_{\text{atoms}}} e_i, \quad \hat{\mathbf{F}}_i = -\frac{\partial E}{\partial \mathbf{p}_i}.
+    \label{eq:energy_force_readout}
+\end{equation}
+Because the scalar energy $E$ is frame-invariant by construction, its spatial gradient $-\nabla_{\mathbf{p}_i} E$ is mathematically guaranteed to be strictly $E(3)$-equivariant and curl-free ($\nabla \times \hat{\mathbf{F}} = \mathbf{0}$, see Lemma~\ref{lem:force_conservation} in Appendix~\ref{app:proofs}).
+
+\noindent\textbf{3. Invariant Molecular Property Prediction (QM9).}
+For global quantum chemical property prediction on molecular graphs, node positions are centered relative to the molecular centroid ($\mathbf{p}_i \leftarrow \mathbf{p}_i - \bar{\mathbf{p}}$) prior to embedding. This centering supplies translation invariance. Under the remaining $O(3)$ rotations and reflections, the full coefficient norms $\|\mathbf{X}_k\|_2 = \sqrt{\sum_{A \in \mathcal{B}_k} (\mathbf{X}_A)^2}$ of each grade component are invariant. The scalar coefficient $\langle\mathbf{X}\rangle_0$ is also invariant, whereas the pseudoscalar coefficient $s=\langle\mathbf{X}\rangle_4\in\mathbb{R}^{C}$ transforms as $s\mapsto\det(R)s$.
+
+We define two readout feature maps, according to the desired symmetry group:
+\begin{equation}
+    \begin{aligned}
+    \mathrm{inv}_{SE(3)}(\mathbf{X})
+      &= \Big(\langle\mathbf{X}\rangle_0,\,s,\,\|\mathbf{X}_1\|_2,\,\|\mathbf{X}_2\|_2,\,\|\mathbf{X}_3\|_2\Big),\\
+    \mathrm{inv}_{E(3)}(\mathbf{X})
+      &= \Big(\langle\mathbf{X}\rangle_0,\,|s|,\,\|\mathbf{X}_1\|_2,\,\|\mathbf{X}_2\|_2,\,\|\mathbf{X}_3\|_2\Big),
+    \end{aligned}
+    \label{eq:pin_invariants}
+\end{equation}
+where both maps take values in $\mathbb{R}^{C\times5}$ and the absolute value is applied componentwise. Retaining the signed pseudoscalar guarantees $SE(3)$ invariance but allows the readout to distinguish reflections. Taking its absolute value additionally enforces reflection invariance, giving an $E(3)$-invariant readout. The signed variant may learn reflection-invariant predictions, but does not enforce this symmetry by construction.
+
+For uncentered multivector representations, full coefficient norms generally change under translation shears. Translation-invariant grade features can instead be formed from the degenerate metric seminorms $\|\langle\mathbf{X}\rangle_k\|_0 = \sqrt{\langle\widetilde{\langle\mathbf{X}\rangle_k}\langle\mathbf{X}\rangle_k\rangle_0}$, which exclude ideal basis blades containing $\mathbf{e}_0$ (Lemma~\ref{lem:norm_invariance} in Appendix~\ref{app:proofs}). In the centered molecular representation, full coefficient norms include both Euclidean and ideal components while preserving the selected symmetry guarantee.
+
+The selected features are concatenated with scalar states $\mathbf{x}_i^{(L)}$, passed through a node-level gated MLP, and aggregated into a molecular representation via graph-level pooling (sum pooling for extensive thermodynamic energies, mean pooling for intensive properties). For the dipole moment, the network predicts partial atomic charges $q_i$, yielding the molecular dipole vector $\vec{\boldsymbol{\mu}} = \sum_i q_i (\mathbf{p}_i - \bar{\mathbf{p}})$ and predicted magnitude $\hat{\mu} = \|\vec{\boldsymbol{\mu}}\|_2$. The resulting scalar predictions inherit the invariance of the selected readout; the dipole vector is equivariant under the corresponding group.
+
+\subsection{Equivariance by Construction}
+\label{subsec:equiv}
+
+We now establish the mathematical guarantees ensuring that the proposed PGA-GNN architecture is strictly $E(3)$-equivariant by construction.
+
+\begin{theorem}[$E(3)$ Equivariance of PGA-GNN Layer]
+\label{thm:equivariance}
+Let $\mathcal{L}$ denote a PGA-GNN message-passing layer mapping input node representations $(\mathbf{X} \in \mathbb{R}^{N \times C \times 16}, \mathbf{x} \in \mathbb{R}^{N \times S})$ and edge attributes $(\mathbf{E} \in \mathbb{R}^{|\mathcal{E}| \times C_E \times 16}, \mathbf{e} \in \mathbb{R}^{|\mathcal{E}| \times S_E})$ to updated representations $(\mathbf{X}' \in \mathbb{R}^{N \times C' \times 16}, \mathbf{x}' \in \mathbb{R}^{N \times S'})$. 
+
+For any global rigid Euclidean transformation (including reflections) $g \in E(3)$ parameterized by an orthogonal PGA versor $V \in \mathrm{Pin}(3,0,1)$ ($V\widetilde{V} = 1$), let $V$ act on multivectors via the linear group representation $\rho_V(\mathbf{X})$ defined in Eq.~\ref{eq:versor_action}. Assuming this action leaves invariant scalar channels $(\mathbf{x}, \mathbf{e})$ unchanged, the layer $\mathcal{L}$ strictly satisfies Definition~\ref{def:equivariance}:
+\begin{equation}
+    \mathcal{L}\left(\rho_V(\mathbf{X}),\, \mathbf{x},\, \rho_V(\mathbf{E}),\, \mathbf{e}\right) = \left(\rho_V(\mathbf{X}'),\, \mathbf{x}'\right).
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+We prove equivariance by verifying the transformation properties of each sequential operation composing the PGA-GNN layer:
+
+\noindent
+\textbf{1. Equivariance of Linear Multivector Maps ($\mathrm{EquiLinear}$).}
+An $\mathrm{EquiLinear}$ layer maps multivectors $\mathbf{X} \in \mathbb{R}^{C \times 16}$ to $\mathbf{Y} \in \mathbb{R}^{C' \times 16}$ according to Eq.~\ref{eq:equilinear}:
+\begin{equation}
+    \mathrm{EquiLinear}(\mathbf{X}) = \sum_{k=0}^{4} \boldsymbol{\Omega}_k \langle \mathbf{X} \rangle_k + \sum_{k=0}^{3} \boldsymbol{\mathcal{N}}_k \mathbf{e}_0 \langle \mathbf{X} \rangle_k.
+\end{equation}
+This formulation represents the most general linear map equivariant to the $\mathrm{Pin}(3,0,1)$ group \citep{gatr}. 
+Under the group representation $\rho_V$, canonical grades are preserved: $\langle \rho_V(\mathbf{X}) \rangle_k = \rho_V(\langle \mathbf{X} \rangle_k)$. Crucially, the ideal basis vector $\mathbf{e}_0$ is strictly invariant under this representation ($\rho_V(\mathbf{e}_0) = \mathbf{e}_0$), even for odd versors \citep{gatr,pga4cs2020}. 
+As defined by the GATr framework, the weights $\boldsymbol{\Omega}_k$ and $\boldsymbol{\mathcal{N}}_k$ contain learnable scalar coefficients for each combination of input and output channel, applied independently to each grade $k$. 
+Because the group representation $\rho_V$ acts linearly on the 16-dimensional multivector space, it naturally commutes with these real scalar multiplications applied across the channel dimensions:
+\begin{equation}
+    \mathrm{EquiLinear}(\rho_V(\mathbf{X})) = \sum_{k=0}^{4} \boldsymbol{\Omega}_k \rho_V(\langle \mathbf{X} \rangle_k) + \sum_{k=0}^{3} \boldsymbol{\mathcal{N}}_k \rho_V(\mathbf{e}_0 \langle \mathbf{X} \rangle_k) = \rho_V\left(\mathrm{EquiLinear}(\mathbf{X})\right).
+\end{equation}
+Hence, node and edge projections transform strictly equivariantly.
+
+\noindent
+\textbf{2. Equivariance of Geometric Messages ($\mathbf{M}_{ij}$).}
+The geometric message combines the channel-wise geometric product $\mathbf{H}_i \mathbf{H}_j$ with projected edge attributes. The geometric product is universally equivariant under the group representation: $\rho_V(\mathbf{A}) \rho_V(\mathbf{B}) = \rho_V(\mathbf{A} \mathbf{B})$ \citep{pga4cs2020}. 
+Because multivector addition is linear and distributes over the action, the complete geometric message is strictly equivariant: $\mathbf{M}_{ij}(V) = \rho_V(\mathbf{M}_{ij})$.
+
+\noindent
+\textbf{3. Strict Invariance of Attention Weights ($\alpha_{ij}$).}
+The dot-product attention score in Eq.~\ref{eq:attention} evaluates the geometric inner product, which relies on the grade-0 projection $\langle \cdot \rangle_0$. 
+For any multivector $\mathbf{A}$, the scalar part is invariant under the versor representation: $\langle \rho_V(\mathbf{A}) \rangle_0 = \langle \mathbf{A} \rangle_0$. Therefore:
+\begin{equation}
+    \left\langle \widetilde{\rho_V(\mathbf{Q}_i)} \rho_V(\mathbf{K}_j) \right\rangle_0 = \left\langle \rho_V(\widetilde{\mathbf{Q}}_i \mathbf{K}_j) \right\rangle_0 = \left\langle \widetilde{\mathbf{Q}}_i \mathbf{K}_j \right\rangle_0.
+\end{equation}
+Since auxiliary non-geometric features $(\mathbf{q}_i, \mathbf{k}_j, \mathbf{e}_{ij})$ are invariant by construction, the combined attention scores and normalized weights satisfy $\alpha_{ij}(V) = \alpha_{ij}$.
+
+\noindent
+\textbf{4. Equivariance of Neighborhood Aggregation.}
+Because the attention weights $\alpha_{ij}$ are frame-invariant scalars, the aggregated multivector message $\bar{\mathbf{M}}_i$ scales equivariantly:
+\begin{equation}
+    \bar{\mathbf{M}}_i(V) = \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \rho_V(\mathbf{M}_{ij}) = \rho_V \left( \sum_{j \in \mathcal{N}(i)} \alpha_{ij} \mathbf{M}_{ij} \right) = \rho_V(\bar{\mathbf{M}}_i).
+\end{equation}
+
+\noindent
+\textbf{5. Equivariance of Gated Non-Linearities, Normalization, and Update.}
+Within the update $\mathrm{EquiMLP}$, the network applies scalar-gated nonlinearities. 
+A non-linear function $\sigma(\cdot)$ acts strictly on the invariant scalar part $\langle \mathbf{X} \rangle_0$, forming a gate scalar $g = \sigma(\langle \mathbf{X} \rangle_0)$. Since $\langle \rho_V(\mathbf{X}) \rangle_0 = \langle \mathbf{X} \rangle_0$, the gate is invariant. Scalar multiplication commutes with the geometric action: $g \cdot \rho_V(\mathbf{X}) = \rho_V(g \cdot \mathbf{X})$.
+Similarly, EquiLayerNorm normalizes features by the invariant geometric inner product $\|\mathbf{X}\|_0 = \sqrt{\langle \widetilde{\mathbf{X}} \mathbf{X} \rangle_0}$, which remains frame-invariant. 
+Residual addition preserves equivariance by linearity.
+
+Combining steps (1)–(5), the updated states satisfy $\mathbf{X}'_i(V) = \rho_V(\mathbf{X}'_i)$ and $\mathbf{x}'_i(V) = \mathbf{x}'_i$. By induction across all $L$ layers, the entire architecture is strictly $E(3)$-equivariant.
+\end{proof}
+
+\subsection{Theoretical Discussion and Comparison}
+\label{sec:discussion}
+
+\noindent
+The formulation of explicit geometric message passing using Projective Geometric Algebra provides several theoretical advantages over existing equivariant architectures, while also presenting specific trade-offs.
+
+
+\noindent
+\textbf{Expressivity vs. Invariant Scalarization.}
+Early equivariant models, such as EGNN \citep{egnn} or SchNet \citep{schnet}, achieve efficiency by reducing spatial interactions to invariant scalars (e.g., relative distances) and updating simple vector fields. While computationally lightweight, this "invariant scalarization" creates a geometric bottleneck: complex angular dependencies and higher-order structural motifs are collapsed. PGA-GNN overcomes this by replacing scalar messages with the geometric product of multivectors. This associative operation explicitly captures both the inner product (distances, angles) and the exterior product (oriented planes, volumes) in a single pass, intrinsically preserving the complete directional depth of the local neighborhood.
+
+
+\noindent
+\textbf{Elegance vs. Spherical Harmonics.}
+To model complex angular interactions, state-of-the-art models like SEGNN \citep{segnn} or MACE \citep{mace} rely on irreducible representations (irreps) of the $SO(3)$ group and spherical harmonics. While highly expressive, these methods suffer from two theoretical drawbacks. First, they rely on computationally expensive Clebsch--Gordan tensor products to combine features. Second, spherical harmonics inherently model $SO(3)$ (rotations around a fixed origin); extending them to $E(3)$ (including translations) often requires ad-hoc architectural separation of radial and angular components. By operating in the PGA space ($\mathcal{G}_{3,0,1}$), PGA-GNN natively unifies rotations and translations as orthogonal transformations (versors) acting on origin-free entities. The geometric product replaces cumbersome tensor products with a closed-form algebraic operation, offering a mathematically unified and often more efficient alternative to irreps.
+
+
+\noindent
+\textbf{Structural Prior vs. Global Transformers.}
+While GATr \citep{gatr} proved the viability of PGA in deep learning, its global attention mechanism ($\mathcal{O}(N^2)$ complexity) dilutes the sparse, local topological priors that are crucial in physical systems. PGA-GNN bridges this gap by embedding PGA into a localized message-passing paradigm, leveraging sparse graphs to drastically improve sample efficiency and scalability while retaining mathematical rigor.
+
+
+\noindent
+\textbf{Theoretical Limitations.}
+Despite these advantages, the PGA-GNN architecture introduces certain trade-offs. Representing every spatial feature as a 16-dimensional multivector continuously carries a larger memory footprint than tracking simple 3D Euclidean vectors. Furthermore, to maintain strict $E(3)$ equivariance, the learnable linear transformations ($\mathrm{EquiLinear}$) are heavily constrained to block-diagonal forms (preventing the mixing of incompatible geometric grades). This means that a PGA-GNN layer possesses significantly fewer learnable parameters per channel compared to a standard unconstrained MLP, which intrinsically restricts its raw parameter expressiveness. To compensate, PGA-GNN relies on its superior structural inductive bias rather than brute-force parametrization.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{images/article_draft_imgs/diagram.pdf}
+    \caption{Message Passing block architecture overview. The figure illustrates the flow of geometric (multivector) and scalar features through the edge-modulated geometric product, attention, and gated update.}
+    \label{fig:mpb}
+\end{figure}
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+To evaluate the representational power and inductive bias of the proposed PGA-GNN architecture, we benchmark it against state-of-the-art equivariant models across physical simulations, molecular dynamics, and quantum chemistry tasks. Comprehensive hyperparameter configurations, training protocols, and compute infrastructure details are documented in Appendix~\ref{app:training_details}.
+
+
+\subsection{N-Body Dynamics and Interacting Spring Systems}
+
+We utilize two variants of physical simulation tasks to evaluate the architectures: a dense gravitational N-body system, and an explicitly structured interacting spring system.
+
+\noindent\textbf{Dataset Generation.}
+We generate synthetic N-body datasets governed by Newton's equations of motion, strictly following the spatial initialization, physical evolution, and global $E(3)$ frame transformations established by the Geometric Algebra Transformer (GATr) \citep{gatr}.
+For the gravitational N-body experiments, we expand the complexity of the original benchmark by increasing the system size to $N=15$ bodies (one central star and 14 planets). To evaluate the architectures on systems with explicit, sparse topological structures, we introduce an interacting spring system variant. Instead of implicit all-to-all gravitational interactions, objects are connected via explicit graph edges representing physical springs. Each edge is assigned a variable spring constant sampled from a uniform distribution, acting as an explicit scalar edge attribute.
+For both variants, we generate a training set of $10^5$ samples. To rigorously test geometric inductive biases, we define three distinct evaluation splits: a standard \textbf{Validation set} ($N=15$), a \textbf{Number Generalization test set} ($N=20$ bodies, testing extrapolation to larger graphs), and an \textbf{E(3) OOD Generalization set} ($N=15$, featuring an extreme mean translation shift of $(200, 0, 0)^\top$ and reflections).
+
+\noindent\textbf{Baselines and Experimental Setup.}
+Node features comprise object masses (scalars), positions (trivectors), and velocities (bivectors). Edges explicitly encode pairwise spatial connections via the equivariant join $\mathbf{E}_{ij} = z_{\text{ref}} (\mathbf{X}_i \vee \mathbf{X}_j)$ (the line connecting the points as a grade-2 bivector, with reference orientation scalar $z_{\text{ref}} = \langle \mathbf{Z}_{\text{ref}} \rangle_{123} = 1$) alongside scalar attributes: relative Euclidean distances for the N-body dataset, and variable spring constants for the spring dataset. Models are trained to predict the 3D positions $\hat{\mathbf{p}}_i^{(t+\Delta t)}$ after 100 time steps by minimizing the Mean Squared Error (MSE) loss:
+\begin{equation}
+    \mathcal{L}_{\text{N-body}} = \frac{1}{N_{\text{bodies}}} \sum_{i=1}^{N_{\text{bodies}}} \|\mathbf{p}_i^{(t+\Delta t)} - \hat{\mathbf{p}}_i^{(t+\Delta t)}\|^2.
+    \label{eq:loss_nbody}
+\end{equation}
+We benchmark PGA-GNN against EGNN \citep{egnn}, SEGNN \citep{segnn}, and GATr \citep{gatr}. Our PGA-GNN uses 2 message-passing layers with 64 multivector and 128 scalar channels ($606\text{k}$ parameters). GATr replicates the original 10-block architecture ($2.21\text{M}$ parameters) with matching channel counts. Crucially, to provide a direct, controlled comparison of the interaction mechanism, we supply GATr with the exact same sparse graph topology by applying an adjacency mask to its geometric attention matrix. This isolates the performance difference between global attention over a graph and explicit geometric product message-passing (same for the MD17 and QM9 tests). EGNN ($134\text{k}$ parameters) and SEGNN ($147\text{k}$ parameters) utilize hyperparameters optimized by their respective authors.
+
+\noindent\textbf{Results and Discussion.}
+
+To evaluate sample efficiency and the strength of each model's geometric inductive bias, we train the networks using varying fractions of the available training data, ranging from $0.1\%$ to $100\%$. Figure~\ref{fig:nbodyspring} reports the resulting prediction errors across different data regimes for both physical systems.
+PGA-GNN consistently outperforms the considered baselines on the Interacting Spring dataset, with a particularly pronounced advantage in the low-data regime. This setting highlights the benefit of explicitly incorporating geometric and relational information into the message-passing mechanism, as the edge attributes directly encode the spring constants governing the interactions. PGA-GNN maintains this advantage across the full range of training set sizes, indicating that its inductive bias allows it to extract the relevant physical structure efficiently from limited data.
+On the gravitational $N$-body dataset, PGA-GNN also demonstrates strong sample efficiency, outperforming GATr and EGNN across the different training regimes and remaining competitive with SEGNN. The relative differences between models are smaller than for the Interacting Spring system, suggesting that the $N$-body dynamics are less dependent on the explicit edge information exploited by PGA-GNN. Nevertheless, PGA-GNN maintains stable performance as the amount of training data varies, demonstrating that its geometric representation remains effective across both low- and high-data regimes.
+Overall, the results demonstrate that PGA-GNN provides a strong geometric inductive bias and, in particular, achieves substantial gains when the underlying physical interactions are naturally represented through geometric and edge-level information. The pronounced improvement on the Interacting Spring dataset further suggests that explicitly encoding the structure of the physical system can significantly improve sample efficiency.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{images/article_draft_imgs/model_comparison_losses_combined.pdf}
+    \caption{Error in predicting object positions (\textbf{Top}: gravitational N-body, \textbf{Bottom}: spring system) as a function of training dataset size ($100 \to 10^5$). \textbf{Left}: Evaluation dataset ($N=15$). \textbf{Middle}: Test dataset ($N=20$ bodies vs. $N=15$ in training). \textbf{Right}: Out-of-Distribution (OOD) evaluation for domain shift robustness.}
+    \label{fig:nbodyspring}
+\end{figure}
+
+\subsection{Molecular Dynamics on Revised MD17}
+
+To evaluate the capacity of our architecture to model complex atomic interactions and predict continuous physical properties, we benchmark PGA-GNN on the Revised MD17 dataset \citep{rmd17}.
+
+\noindent\textbf{Dataset Description.}
+The Revised MD17 dataset \citep{md17} provides noise-free DFT energies and atomic forces for 10 small organic molecules. To evaluate generalization and avoid data leakage from temporal autocorrelation, we strictly adhere to the recommended small-data regime. For each molecule, we train on only $1000$ samples ($950$ train, $50$ validation) and evaluate on the official Split 1 test sets. The task is to predict both total molecular energy and atomic forces.
+
+\noindent\textbf{Experimental Setup.}
+PGA-GNN is configured with 6 layers ($2.3$M parameters). Atomic numbers $Z$ are mapped to scalar node features, while 3D coordinates are embedded as trivectors. Edges are built within a $5$~\AA\ radial cutoff, encoding pairwise Euclidean distances via a Gaussian Radial Basis Function (RBF) \citep{rbf} as scalar features. Models are trained jointly on potential energies and atomic forces using a weighted Mean Squared Error (MSE) loss:
+\begin{equation}
+    \mathcal{L}_{\text{MD17}} = \lambda_E \, \mathrm{MSE}(E, \hat{E}) + \lambda_F \, \frac{1}{3N_{\text{atoms}}} \sum_{i=1}^{N_{\text{atoms}}} \|\mathbf{F}_i - \hat{\mathbf{F}}_i\|^2,
+    \label{eq:loss_md17}
+\end{equation}
+where $\lambda_F = 1000.0$ and $\lambda_E = 1.0$, balancing force and energy magnitudes following standard practice. Models are trained for 3500 epochs (batch size 32) using AdamW with an initial learning rate of $1 \times 10^{-3}$, a weight decay of $5 \times 10^{-7}$, and a cosine annealing scheduler. We apply an Exponential Moving Average (EMA, decay $0.999$) and trigger Stochastic Weight Averaging (SWA) at epoch 3000.
+
+\noindent\textbf{Results and Discussion.}
+Table~\ref{tab:md17_results} summarizes the predictive performance on the Revised MD17 dataset. PGA-GNN achieves lower average energy and force prediction errors than our reported 2-body baselines, EGNN and SEGNN. Notably, PGA-GNN achieves an average force MAE of $9.94\text{ meV/\AA}$ compared to $16.06\text{ meV/\AA}$ for EGNN (a $38\%$ reduction, improving force predictions on all ten molecules) and $26.82\text{ meV/\AA}$ for SEGNN (a $63\%$ reduction). On molecular energy prediction, PGA-GNN achieves an average MAE of $4.68\text{ meV}$, outperforming EGNN ($7.79\text{ meV}$) and SEGNN ($11.43\text{ meV}$).
+
+\noindent
+\textbf{A note on GATr's performance.} 
+The elevated MAEs observed for GATr on MD17 (e.g., $1884\text{ meV}$ for Toluene, $730\text{ meV}$ for Paracetamol) warrant a detailed technical analysis. Because GATr is evaluated with the identical sparse graph adjacency mask ($\mathbf{A}_{ij} > 0$), this performance difference does not isolate locality as the sole cause. Rather, the gap reflects distinct architectural formulations between the two models:
+First, while the adjacency mask zeroes attention weights for disconnected pairs, standard GATr does not ingest explicit geometric edge multivectors ($\mathbf{E}_{ij}$) or scalar physical edge attributes (such as RBF distance expansions) directly into its value transformations. In contrast, PGA-GNN explicitly conditions geometric and scalar messages on edge attributes.
+Second, atomic forces are derived through analytical negative gradients of total energy ($\mathbf{F}_i = -\nabla_{\mathbf{p}_i} E$). Backpropagating gradients through deep multi-head attention maps without explicit edge conditioning may present optimization challenges in low-data regimes ($N_{\text{train}} = 950$ samples, with $50$ validation samples); we frame this force-gradient optimization difficulty as an empirical hypothesis rather than an established causal fact, and future controlled ablations will be valuable to disentangle these factors.
+
+\noindent
+When contextualizing these results, it is important to distinguish between general-purpose network architectures and specialized machine learning potentials. Specialized architectures utilizing high-degree spherical harmonics and many-body cluster expansions (such as MACE \citep{mace} and NequIP \citep{neuqip}) achieve significantly lower absolute energy and force errors, benefiting from explicit many-body interactions. Among general-purpose 2-body models, PGA-GNN achieves competitive results, with an average force prediction of $9.94\text{ meV/\AA}$ across all 10 molecules, approaching the reported average of PaiNN \citep{painn} ($9.01\text{ meV/\AA}$). We note that PaiNN's reported literature average was computed over a 7-molecule subset (excluding Azobenzene, Benzene, and Paracetamol), so direct average-to-average comparisons should be interpreted with caution.
+
+Ultimately, PGA-GNN provides an effective 2-body baseline unconstrained by molecule-specific heuristics. While it does not incorporate explicit higher-order cluster expansions like MACE or NequIP, it shows clear improvements over standard invariant graph models and spherical harmonic baselines of comparable body order, confirming the viability of the geometric product as a tensor-free alternative for capturing directional interactions.
+
+\begin{table*}[t]
+    \centering
+    \caption{Mean Absolute Error (MAE) for Energy (E, in meV) and Force (F, in meV/\AA) predictions on the Revised MD17 dataset. All models are trained on $N_{\text{train}} = 1000$ samples. Bold numbers indicate the best performance. Results at the left of the first vertical line are aggregated from the literature.}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{llccccc|ccc||c}
+            \toprule
+             &   & MACE & NequIP & ACE & GAP & PaiNN & EGNN & SEGNN & GATr & \textbf{PGA-GNN (Ours)} \\
+            \midrule
+            \multicolumn{11}{c}{$N_{\text{train}} = 1000$}                                                                                                                                     \\
+            \midrule
+            \multirow{2}{*}{\textbf{Aspirin}}
+             & E & \textbf{2.2}    & 2.3                 & 6.1           & 17.7          & 6.9               & 27.41           & 24.31            & 469.27          & 11.01                   \\
+             & F & \textbf{6.6}    & 8.2                 & 17.9          & 44.9          & 16.1              & 31.82           & 59.20             & 92.2            & 17.51                   \\
+            \hline
+            \multirow{2}{*}{\textbf{Azobenzene}}
+             & E & 1.2             & \textbf{0.7}        & 3.6           & 8.5           & -                 & 6.95            & 13.62             & 711             & 4.90                    \\
+             & F & 3.0             & \textbf{2.9}        & 10.9          & 24.5          & -                 & 17.39           & 37.41             & 40.56           & 7.73                    \\
+            \hline
+            \multirow{2}{*}{\textbf{Benzene}}
+             & E & 0.4             & \textbf{0.04}       & 0.04          & 0.75          & -                 & 0.52            & 0.52              & 88.17           & 1.01                    \\
+             & F & 0.3             & \textbf{0.3}        & 0.5           & 6.0           & -                 & 2.06            & 2.99              & 45.55           & 1.79                    \\
+            \hline
+            \multirow{2}{*}{\textbf{Ethanol}}
+             & E & \textbf{0.4}    & \textbf{0.4}        & 1.2           & 3.5           & 2.7               & 3.90            & 2.14              & 168.77          & 4.23                    \\
+             & F & \textbf{2.1}    & 2.8                 & 7.3           & 18.1          & 10.0              & 17.20           & 13.75             & 93.26           & 14.04                   \\
+            \hline
+            \multirow{2}{*}{\textbf{Malonaldehyde}}
+             & E & \textbf{0.8}    & 0.8                 & 1.7           & 4.8           & 3.9               & 5.59            & 4.62              & 119.17          & 3.74                    \\
+             & F & \textbf{4.1}    & 5.1                 & 11.1          & 26.4          & 13.8              & 19.82           & 20.91             & 128.68          & 14.35                   \\
+            \hline
+            \multirow{2}{*}{\textbf{Naphthalene}}
+             & E & \textbf{0.5}    & 0.9                 & 0.9           & 3.8           & 5.1               & 2.14            & 7.14              & 289.35          & 2.84                    \\
+             & F & \textbf{1.6}    & 1.3                 & 5.1           & 16.5          & 3.6               & 6.43            & 18.89             & 85.89           & 4.46                    \\
+            \hline
+            \multirow{2}{*}{\textbf{Paracetamol}}
+             & E & \textbf{1.3}    & 1.4                 & 4.0           & 8.5           & -                 & 16.58           & 28.96             & 730             & 9.59                   \\
+             & F & \textbf{4.8}    & 5.9                 & 12.7          & 28.9          & -                 & 26.71           & 61.79             & 84.35           & 14.13                   \\
+            \hline
+            \multirow{2}{*}{\textbf{Salicylic acid}}
+             & E & 0.9             & \textbf{0.7}        & 1.8           & 5.6           & 4.9               & 9.99            & 21.53             & 415.89          & 4.61                    \\
+             & F & \textbf{3.1}    & 4.0                 & 9.3           & 24.7          & 9.1               & 16.57           & 26.39             & 78.12           & 11.56                   \\
+            \hline
+            \multirow{2}{*}{\textbf{Toluene}}
+             & E & 0.5             & \textbf{0.3}        & 1.1           & 4.0           & 4.2               & 3.10            & 5.99              & 1884            & 2.53                    \\
+             & F & \textbf{1.5}    & 1.6                 & 6.5           & 17.8          & 4.4               & 10.79           & 10.92             & 478.4           & 5.65                    \\
+            \hline
+            \multirow{2}{*}{\textbf{Uracil}}
+             & E & 0.5             & \textbf{0.4}        & 1.1           & 3.0           & 4.5               & 1.75            & 5.50              & 29.15           & 2.38                    \\
+             & F & \textbf{2.1}    & 3.1                 & 6.6           & 17.6          & 6.1               & 11.84           & 15.94             & 106.48          & 8.19                   \\
+            \midrule
+            \multicolumn{11}{c}{\textbf{Overall Performance}}                                                                                                                                  \\
+            \midrule
+            \multirow{2}{*}{\textbf{Mean}}
+             & E & \textbf{0.87}   & 0.93                & 2.25          & 6.01          & 4.6               & 7.79            & 11.43             & 449.63          & 4.68                    \\
+             & F & \textbf{2.66}   & 3.22                & 8.79          & 21.44         & 9.01              & 16.06           & 26.82             & 113.31          & 9.94                   \\
+            \bottomrule
+        \end{tabular}%
+    }
+    \label{tab:md17_results}
+\end{table*}
+
+\subsection{Molecular Property Prediction on QM9}
+
+To further evaluate the ability of PGA-GNN to learn from structured molecular graphs and predict global quantum chemical properties, we benchmark our model on the QM9 dataset \citep{qm9}.
+
+\noindent\textbf{Dataset Description.}
+The QM9 dataset \citep{qm9} contains $\approx 134,000$ small organic molecules with 3D atomic coordinates. The task is to predict 12 scalar physical and thermodynamic properties. Following standard practice \citep{cormorant}, we allocate $100,000$ molecules for training, $18,000$ for validation, and the remainder for testing. All target properties are normalized using the mean absolute deviation (MAD) computed over the training set.
+
+\noindent\textbf{Experimental Setup.}
+Rather than compiling an exhaustive list of highly specialized or heavily parameterized QM9 models, we carefully select baselines to isolate the impact of the underlying geometric representation. We compare PGA-GNN against three representative 2-body equivariant architectures: EGNN \citep{egnn}, SEGNN \citep{segnn}, and GATr \citep{gatr}. For GATr, we train the model from scratch using the exact same data splits and optimization protocol as PGA-GNN to provide a direct, controlled comparison on the message-passing mechanism.
+We employ 3 geometric message-passing layers ($1$M parameters). Node embeddings are aggregated into a graph-level representation through task-specific pooling operations (sum pooling for extensive quantities, mean pooling for intensive properties). Following standard practice \citep{cormorant}, models are optimized by minimizing the Mean Absolute Error (MAE) loss on normalized property targets:
+\begin{equation}
+    \mathcal{L}_{\text{QM9}} = \frac{1}{B} \sum_{b=1}^{B} \left| y_b^{\text{norm}} - \hat{y}_b^{\text{norm}} \right|,
+    \label{eq:loss_qm9}
+\end{equation}
+where $y^{\text{norm}} = (y - \mu_y) / \mathrm{MAD}_y$ is normalized by the training set mean $\mu_y$ and mean absolute deviation $\mathrm{MAD}_y$ for each target property (with Smooth $L_1$ loss applied for the dipole moment $\mu$). Both PGA-GNN and GATr are trained using the AdamW optimizer with a batch size of $256$.
+
+For the QM9 experiments reported in Table~\ref{tab:qm9_results_wide}, we use the $SE(3)$-invariant readout in Eq.~\ref{eq:pin_invariants}, retaining the signed pseudoscalar coefficient alongside full coefficient grade norms in the centered molecular representation.
+
+
+\begin{table*}[t]
+    \centering
+    \caption{Mean Absolute Error (MAE) on the 12 target properties of the QM9 dataset. PGA-GNN uses the $SE(3)$-invariant readout with a signed pseudoscalar coefficient. Baseline results for EGNN and SEGNN are taken from their respective publications. Bold indicates the best performing model. \textbf{GMRE} represents the Geometric Mean of Relative Errors, where each MAE is normalized by the best performing score in its respective column before averaging (closer to 1.0 is better).}
+    \label{tab:qm9_results_wide}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lccccccccccccc}
+            \toprule
+            \textbf{Model}          & $\alpha$       & $\Delta\varepsilon$ & $\varepsilon_{\text{HOMO}}$ & $\varepsilon_{\text{LUMO}}$ & $\mu$          & $C_v$          & $G$         & $H$         & $R^2$         & $U$         & $U_0$       & ZPVE          & \textbf{GMRE} $\downarrow$ \\
+                                    & (bohr$^3$)     & (meV)               & (meV)                       & (meV)                       & (D)            & (cal/mol K)    & (meV)       & (meV)       & (bohr$^2$)    & (meV)       & (meV)       & (meV)         &                            \\
+            \midrule
+            EGNN                    & 0.071          & 48                  & 29                          & 25                          & 0.029          & 0.031          & \textbf{12} & \textbf{12} & \textbf{0.11} & \textbf{12} & \textbf{12} & 1.55          & \textbf{1.119}             \\
+            SEGNN                   & 0.060          & \textbf{42}         & \textbf{24}                 & \textbf{21}                 & 0.023          & 0.031          & 15          & 16          & 0.66          & 13          & 15          & \textbf{1.55} & 1.294                      \\
+            GATr                    & 0.100          & 49                  & 28                          & 26                          & 0.020          & 0.043          & 24          & 23          & 2.48          & 28          & 27          & 3.30          & 2.035                      \\
+            \textbf{PGA-GNN (Ours)} & \textbf{0.059} & 48                  & 30                          & 25                          & \textbf{0.016} & \textbf{0.029} & 15          & 15          & 0.34          & 14.7        & 16          & 1.60          & 1.253                      \\
+            \bottomrule
+        \end{tabular}%
+    }
+\end{table*}
+
+\noindent\textbf{Results and Discussion.}
+Table~\ref{tab:qm9_results_wide} reports the MAE across the 12 QM9 target properties alongside the Geometric Mean of Relative Errors (GMRE). EGNN achieves the lowest aggregate GMRE ($1.119$), primarily driven by its lower errors on thermodynamic energies ($U_0$, $U$, $H$, $G$) and spatial extent ($R^2$). PGA-GNN achieves an aggregate GMRE of $1.253$, ranking second among the compared models and outperforming both SEGNN ($1.294$) and GATr ($2.035$).
+
+Among the compared 2-body architectures, PGA-GNN achieves the lowest error on three properties: dipole moment ($\mu = 0.016\text{ D}$), isotropic polarizability ($\alpha = 0.059\text{ bohr}^3$), and heat capacity ($C_v = 0.029\text{ cal/mol K}$). On the remaining nine targets, SEGNN achieves the lowest errors on orbital energy levels ($\Delta\varepsilon$, HOMO, LUMO) and ZPVE, while EGNN obtains the lowest errors on scalar thermodynamic energies. 
+
+When compared against GATr (which shares the same underlying $\mathcal{G}_{3,0,1}$ multivector representation and receives the identical graph adjacency mask), PGA-GNN achieves lower errors across all 12 properties, reducing the GMRE from $2.035$ to $1.253$. Because both architectures operate on the same graph connectivity, this empirical difference reflects the architectural formulation—specifically, PGA-GNN's inclusion of explicit geometric edge multivectors ($\mathbf{E}_{ij}$) and scalar edge features within an edge-conditioned message-passing framework, rather than set self-attention over node multivectors alone. 
+
+\subsection{Computational Efficiency and Pareto Analysis}
+\label{subsec:pareto_efficiency}
+
+To evaluate the computational efficiency and practical scaling of the proposed architecture, we evaluate the floating-point operations (FLOPs), parameter footprint, and out-of-distribution (OOD) generalization error during inference on the N-body spring benchmark ($B=64$ systems of $N=15$ interacting bodies, evaluated at 100 training examples). The results and empirical Pareto frontiers are illustrated in Figure~\ref{fig:flops}.
+
+PGA-GNN requires $6.795\text{ GFLOPs}$ per forward pass with $606\text{k}$ parameters, achieving a Test OOD MSE of $(2.02 \pm 0.21) \times 10^{-6}$. In contrast, the global geometric transformer baseline GATr requires $25.033\text{ GFLOPs}$ ($3.7\times$ higher compute) and $2.21\text{M}$ parameters ($3.6\times$ larger model footprint), with an OOD error substantially higher ($(2.33 \pm 0.08) \times 10^{-3}$). While lightweight scalar (EGNN, $2.043\text{ GFLOPs}$, $134\text{k}$ params) and harmonic (SEGNN, $3.079\text{ GFLOPs}$, $147\text{k}$ params) baselines incur fewer FLOPs by restricting operations to invariant pairwise distances or $l=1$ steerable representations, their constrained geometric expressivity yields higher OOD errors. As depicted in Figure~\ref{fig:flops}, PGA-GNN establishes a non-dominated Pareto frontier across the hardware-agnostic complexity axes of compute efficiency (Accuracy vs. FLOPs) and parameter efficiency (Accuracy vs. Model Size). 
+We emphasize that while FLOPs and parameter counts quantify arithmetic complexity, wall-clock latency and GPU memory consumption also depend on low-level kernel fusion (e.g., FlashAttention kernels in transformers vs.\ sparse graph scatter/gather in GNNs) and edge tensor materialization, which we analyze comprehensively in Appendix~\ref{app:compute} (Table~\ref{tab:benchmarks_hardware}).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.8\linewidth]{images/article_draft_imgs/pareto_frontier.pdf}
+    \caption{Pareto efficiency comparison on the N-body spring benchmark ($B=64$, $N=15$, 100 training examples). (a) Test OOD loss (MSE, log scale) vs. inference compute (GFLOPs). (b) Test OOD loss vs. parameter count. PGA-GNN establishes the optimal Pareto frontier, achieving orders-of-magnitude lower generalization error than EGNN and SEGNN at a fraction of the compute and parameter cost of GATr.}
+    \label{fig:flops}
+\end{figure}
+
+
+\section{Ablation Studies}
+\label{sec:ablation}
+
+To assess the contribution of each architectural component, we perform ablations on the gravitational $N$-body dataset across training set sizes of $N_{\text{train}} \in \{100, 1000, 10000\}$. We consider four variants: (i) without edge attributes, (ii) without the geometric product, (iii) without both edge attributes and geometric products, and (iv) without the scalar track. Validation, Test, and OOD MSE averaged over three random seeds are reported in Figure~\ref{fig:abl}.
+
+The results highlight the complementary roles of the different architectural components. Removing edge attributes consistently degrades performance relative to the baseline, indicating that relational information carried by the edges provides a useful inductive bias. The geometric product has a substantially larger impact: removing it leads to a pronounced degradation in both in-distribution and OOD performance, demonstrating its importance for capturing the underlying geometric structure. Removing both the geometric product and edge attributes results in the poorest overall performance, further supporting the complementary contribution of these two components. Finally, removing the scalar track leads to a modest but consistent degradation across training set sizes, indicating that the scalar representation provides additional information beyond the geometric features alone. Overall, the ablations demonstrate that on gravitational particle dynamics, PGA-GNN benefits from combining geometric products, edge attributes, and scalar features, with the geometric product providing the dominant contribution to predictive and OOD performance. These findings are specific to the gravitational $N$-body benchmark. Establishing the contributions of individual components to spring dynamics and molecular prediction requires task-specific ablations. Detailed numerical results and depth scaling analysis are reported in Appendix~\ref{app:ablations}.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{images/article_draft_imgs/ablation_components.pdf}
+    \caption{Ablation study on the gravitational N-body system across training set sizes $N_{\text{train}} \in \{100, 1000, 10000\}$. Results report mean squared error (MSE) on Validation, Test, and OOD splits averaged over three seeds.}
+    \label{fig:abl}
+\end{figure}
+
+\section{Conclusion, Limitations and Future Work}
+\label{sec:conclusion}
+
+\noindent
+In this work, we introduced the Projective Geometric Algebra Graph Neural Network (PGA-GNN), demonstrating that explicit spatial message passing via the geometric product provides a general, strictly $E(3)$-equivariant inductive bias for modeling physical and molecular systems. 
+Despite its predictive advantages, operating continuously over 16-dimensional PGA multivectors introduces inherent memory and computational overhead compared to lightweight scalar or canonicalized methods \citep{egnn,loca}. Furthermore, while the strictly constrained equivariant linear layers guarantee geometric integrity, they intrinsically trade away the unconstrained parameter expressiveness of standard MLPs. To mitigate these computational bottlenecks, future work will focus on developing specialized hardware kernels optimized for sparse geometric operations. Architecturally, we plan to extend PGA-GNN to capture higher-order many-body interactions, analogous to recent advancements in machine learning potentials. We also aim to investigate alternative algebraic signatures such as Conformal Geometric Algebra (CGA) to model even broader classes of geometric and topological data.
+
+
+\noindent
+\textbf{Reproducibility.}
+To ensure full reproducibility and facilitate future research, our complete codebase, including data generation scripts, model definitions, configuration files, and training procedures, is available at:
+\url{https://anonymous.4open.science/r/pgagnn-CB3D/README.md}.
+
+\bibliographystyle{tmlr}
+\bibliography{ref}
+
+\newpage
+\appendix
+
+\section{Extended Mathematical Proofs and Equivariance Guarantees}
+\label{app:proofs}
+
+In this section, we provide the complete, step-by-step mathematical proofs supporting the theoretical guarantees of PGA-GNN.
+
+\subsection{Fundamental Properties of the Versor Representation}
+
+We establish three foundational lemmas governing the behavior of the linear group representation $\rho: \mathrm{Pin}(3,0,1) \to \mathrm{GL}(\mathcal{G}_{3,0,1})$ defined in Eq.~\ref{eq:versor_action}. Recall that any orthogonal versor $V \in \mathrm{Pin}(3,0,1)$ satisfies $V \widetilde{V} = \widetilde{V} V = 1$ and decomposes into a product of unit 1-vectors $V = \mathbf{u}_1 \mathbf{u}_2 \dots \mathbf{u}_k$, with $V$ even ($k$ even) for rigid-body motions in $SE(3)$ and $V$ odd ($k$ odd) for spatial reflections.
+
+\begin{lemma}[Cyclic Invariance of the Scalar Part]
+\label{lem:cyclic_scalar}
+For any multivector $\mathbf{A} \in \mathcal{G}_{3,0,1}$ and any versor $V \in \mathrm{Pin}(3,0,1)$, the grade-0 scalar projection is strictly invariant under the representation $\rho_V$:
+\begin{equation}
+    \langle \rho_V(\mathbf{A}) \rangle_0 = \langle \mathbf{A} \rangle_0.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+First, consider an even versor $V \in \mathrm{Spin}^+(3,0,1)$. The representation acts via the sandwich product $\rho_V(\mathbf{A}) = V \mathbf{A} \widetilde{V}$. The grade-0 projection satisfies the cyclic property for products involving normalized versors: $\langle X Y \rangle_0 = \langle Y X \rangle_0$ whenever $Y = \widetilde{X}$ is a versor \citep{pga4cs2020}. Thus:
+\begin{equation}
+    \langle \rho_V(\mathbf{A}) \rangle_0 = \langle V \mathbf{A} \widetilde{V} \rangle_0 = \langle \mathbf{A} \widetilde{V} V \rangle_0 = \langle \mathbf{A} \cdot 1 \rangle_0 = \langle \mathbf{A} \rangle_0.
+\end{equation}
+Second, consider an odd versor $V \in \mathrm{Pin}(3,0,1) \setminus \mathrm{Spin}^+(3,0,1)$, representing a spatial reflection. The action is given by $\rho_V(\mathbf{A}) = V \widehat{\mathbf{A}} \widetilde{V}$, where $\widehat{\cdot}$ is the grade involution. By linearity and cyclic invariance:
+\begin{equation}
+    \langle \rho_V(\mathbf{A}) \rangle_0 = \langle V \widehat{\mathbf{A}} \widetilde{V} \rangle_0 = \langle \widehat{\mathbf{A}} \widetilde{V} V \rangle_0 = \langle \widehat{\mathbf{A}} \rangle_0.
+\end{equation}
+By definition of the grade involution, $\widehat{\mathbf{A}} = \sum_{k=0}^4 (-1)^k \langle \mathbf{A} \rangle_k$. For the scalar grade $k=0$, $(-1)^0 = +1$, so $\langle \widehat{\mathbf{A}} \rangle_0 = \langle \mathbf{A} \rangle_0$. Therefore, $\langle \rho_V(\mathbf{A}) \rangle_0 = \langle \mathbf{A} \rangle_0$ holds universally for all $V \in \mathrm{Pin}(3,0,1)$.
+\end{proof}
+
+\begin{lemma}[Commutation with Canonical Involutions]
+\label{lem:involution_commute}
+For any $\mathbf{X} \in \mathcal{G}_{3,0,1}$ and any $V \in \mathrm{Pin}(3,0,1)$, the reversion $\widetilde{\cdot}$ and grade involution $\widehat{\cdot}$ commute with the group representation $\rho_V$:
+\begin{equation}
+    \widetilde{\rho_V(\mathbf{X})} = \rho_V(\widetilde{\mathbf{X}}), \quad \text{and} \quad \widehat{\rho_V(\mathbf{X})} = \rho_V(\widehat{\mathbf{X}}).
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+For even $V$, $\rho_V(\mathbf{X}) = V \mathbf{X} \widetilde{V}$. Using the anti-automorphism property of reversion $\widetilde{A B} = \widetilde{B} \widetilde{A}$ and noting that for even versors $\widetilde{\widetilde{V}} = V$, we have:
+\begin{equation}
+    \widetilde{\rho_V(\mathbf{X})} = \widetilde{V \mathbf{X} \widetilde{V}} = \widetilde{\widetilde{V}} \widetilde{\mathbf{X}} \widetilde{V} = V \widetilde{\mathbf{X}} \widetilde{V} = \rho_V(\widetilde{\mathbf{X}}).
+\end{equation}
+For odd $V$, $\rho_V(\mathbf{X}) = V \widehat{\mathbf{X}} \widetilde{V}$. Reversion and grade involution commute ($\widetilde{\widehat{\mathbf{X}}} = \widehat{\widetilde{\mathbf{X}}}$). Because $V$ is a product of an odd number of vectors $\mathbf{u}_1 \dots \mathbf{u}_k$, its reversion satisfies $\widetilde{\widetilde{V}} = V$. Hence:
+\begin{equation}
+    \widetilde{\rho_V(\mathbf{X})} = \widetilde{V \widehat{\mathbf{X}} \widetilde{V}} = \widetilde{\widetilde{V}} \widetilde{\widehat{\mathbf{X}}} \widetilde{V} = V \widehat{\widetilde{\mathbf{X}}} \widetilde{V} = \rho_V(\widetilde{\mathbf{X}}).
+\end{equation}
+The grade involution commutation $\widehat{\rho_V(\mathbf{X})} = \rho_V(\widehat{\mathbf{X}})$ follows identically because $\widehat{V} = V$ for even versors and $\widehat{V} = -V$ for odd versors, with the signs canceling in the sandwich product $(-V)\widehat{\widehat{\mathbf{X}}}(-\widetilde{V}) = V \widehat{\mathbf{X}} \widetilde{V}$.
+\end{proof}
+
+\begin{lemma}[Strict Invariance of the Geometric Norm]
+\label{lem:norm_invariance}
+The Euclidean norm $\|\mathbf{X}\|_0 = \sqrt{\langle \widetilde{\mathbf{X}} \mathbf{X} \rangle_0}$ is strictly invariant under $\mathrm{Pin}(3,0,1)$:
+\begin{equation}
+    \|\rho_V(\mathbf{X})\|_0 = \|\mathbf{X}\|_0, \quad \forall V \in \mathrm{Pin}(3,0,1), \; \forall \mathbf{X} \in \mathcal{G}_{3,0,1}.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Applying Lemmas~\ref{lem:cyclic_scalar} and~\ref{lem:involution_commute}:
+\begin{align}
+    \|\rho_V(\mathbf{X})\|_0^2 
+    &= \big\langle \widetilde{\rho_V(\mathbf{X})} \rho_V(\mathbf{X}) \big\rangle_0 
+    = \big\langle \rho_V(\widetilde{\mathbf{X}}) \rho_V(\mathbf{X}) \big\rangle_0.
+\end{align}
+Because the versor representation is an algebraic homomorphism over the geometric product ($\rho_V(\mathbf{A})\rho_V(\mathbf{B}) = \rho_V(\mathbf{A}\mathbf{B})$), this simplifies to:
+\begin{equation}
+    \|\rho_V(\mathbf{X})\|_0^2 = \big\langle \rho_V(\widetilde{\mathbf{X}}\mathbf{X}) \big\rangle_0 = \big\langle \widetilde{\mathbf{X}}\mathbf{X} \big\rangle_0 = \|\mathbf{X}\|_0^2.
+\end{equation}
+Taking the principal square root concludes the proof.
+\end{proof}
+
+\subsection{Equivariance of the Geometric Join and Coordinate Readout}
+
+\begin{lemma}[Equivariance of the Geometric Join and Equivariant Join]
+\label{lem:join_equivariance}
+Let $\mathbf{X}_i, \mathbf{X}_j \in \langle \mathcal{G}_{3,0,1} \rangle_3$ be two 3D points represented as trivectors.
+\begin{enumerate}
+    \item Under any proper rigid-body transformation (rotations and translations) $V \in \mathrm{Spin}^+(3,0,1)$ corresponding to $g \in SE(3)$, the standard regressive join product $\mathbf{X}_i \vee \mathbf{X}_j$ defined in Eq.~\ref{eq:join_def} is strictly equivariant:
+    \begin{equation}
+        \rho_V(\mathbf{X}_i) \vee \rho_V(\mathbf{X}_j) = \rho_V(\mathbf{X}_i \vee \mathbf{X}_j).
+    \end{equation}
+    \item Under an odd versor $V \in \mathrm{Pin}(3,0,1) \setminus \mathrm{Spin}^+(3,0,1)$ representing an improper isometry (spatial reflections, parameterized by spatial orthogonal transformation $R \in O(3)$ with $\det(R) = -1$), the regressive join transforms with a parity sign flip:
+    \begin{equation}
+        \rho_V(\mathbf{X}_i) \vee \rho_V(\mathbf{X}_j) = \det(R) \, \rho_V(\mathbf{X}_i \vee \mathbf{X}_j) = -\rho_V(\mathbf{X}_i \vee \mathbf{X}_j).
+    \end{equation}
+    \item Consequently, the reference-modulated equivariant join $\mathbf{E}_{ij} = \mathrm{EquiJoin}(\mathbf{X}_i, \mathbf{X}_j; \mathbf{Z}_{\text{ref}}) = z_{\text{ref}} (\mathbf{X}_i \vee \mathbf{X}_j)$ \citep{gatr}, where $z_{\text{ref}} = \langle \mathbf{Z}_{\text{ref}} \rangle_{123} \in \mathbb{R}$ is the Euclidean orientation scalar from a reference multivector $\mathbf{Z}_{\text{ref}}$ (with $z_{\text{ref}} = 1$ in canonical orientation), transforms equivariantly under the full Pin group $\mathrm{Pin}(3,0,1)$ (representing the complete Euclidean group $E(3)$ including reflections):
+    \begin{equation}
+        \mathrm{EquiJoin}(\rho_V(\mathbf{X}_i), \rho_V(\mathbf{X}_j); \rho_V(\mathbf{Z}_{\text{ref}})) = \rho_V(\mathbf{E}_{ij}), \quad \forall V \in \mathrm{Pin}(3,0,1).
+    \end{equation}
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+We follow the algebraic decomposition of the PGA join established by \citet[Eq.~35]{pga4cs2020} and \citet[Appendix~A.2, Proposition~7]{gatr}, specialized to point trivectors.
+
+For any two 3D point trivectors $\mathbf{X}, \mathbf{Y} \in \langle \mathcal{G}_{3,0,1} \rangle_3$, we decompose them uniquely into a Euclidean component and an ideal component:
+\begin{equation}
+    \mathbf{X} = \mathbf{t}_X + \mathbf{e}_0 \mathbf{p}_X, \quad \mathbf{Y} = \mathbf{t}_Y + \mathbf{e}_0 \mathbf{p}_Y,
+\end{equation}
+where $\mathbf{t}_X, \mathbf{t}_Y \in \operatorname{span}(\mathbf{e}_{123}) = \langle \mathcal{G}_{3,0,0} \rangle_3$ and $\mathbf{p}_X, \mathbf{p}_Y \in \langle \mathcal{G}_{3,0,0} \rangle_2$. Under our definition $\mathbf{X} \vee \mathbf{Y} = J^{-1}(J(\mathbf{X}) \wedge J(\mathbf{Y}))$ based on the right-complement dual $\mathbf{e}_A \wedge J(\mathbf{e}_A) = I$, the PGA regressive join of two trivectors is expressed in terms of the standard Euclidean join $\vee_{\mathrm{Euc}}$ as:
+\begin{equation}
+    (\mathbf{t}_X + \mathbf{e}_0 \mathbf{p}_X) \vee (\mathbf{t}_Y + \mathbf{e}_0 \mathbf{p}_Y) = -\Big[ \mathbf{t}_X \vee_{\mathrm{Euc}} \mathbf{p}_Y + (-1)^n \hat{\mathbf{p}}_X \vee_{\mathrm{Euc}} \mathbf{t}_Y + \mathbf{e}_0 (\mathbf{p}_X \vee_{\mathrm{Euc}} \mathbf{p}_Y) \Big],
+    \label{eq:pga_join_decomp}
+\end{equation}
+where $n=3$, $\hat{\mathbf{p}}_X$ is the grade involution of $\mathbf{p}_X$, and $\mathbf{a} \vee_{\mathrm{Euc}} \mathbf{b} = ((\mathbf{a} \tilde{\mathbf{e}}_{123}) \wedge (\mathbf{b} \tilde{\mathbf{e}}_{123})) \mathbf{e}_{123}$ is the standard Euclidean join.
+
+\paragraph{Remark on Dual Conventions and Sign.}
+In \citet[Eq.~36]{pga4cs2020}, Dorst explicitly notes that under the Hodge dual / right complement, arguments must be swapped ($\star^{-1}(\star \mathbf{B} \wedge \star \mathbf{A})$) to compensate for the sign of the Hodge duality. Because our Definition in Eq.~\ref{eq:join_def} maintains canonical operand order without swapping ($J^{-1}(J(\mathbf{A}) \wedge J(\mathbf{B}))$), the overall minus sign in Eq.~\ref{eq:pga_join_decomp} appears for trivector inputs. To verify this, consider $\mathbf{X} = \mathbf{e}_{123}$ and $\mathbf{Y} = \mathbf{e}_{123} - \mathbf{e}_{023}$, representing the origin $(0,0,0)^\top$ and the unit point $(1,0,0)^\top$. Here $\mathbf{t}_X = \mathbf{e}_{123}, \mathbf{p}_X = 0, \mathbf{t}_Y = \mathbf{e}_{123}, \mathbf{p}_Y = -\mathbf{e}_{23}$. Then Eq.~\ref{eq:pga_join_decomp} yields $-(\mathbf{e}_{123} \vee_{\mathrm{Euc}} (-\mathbf{e}_{23})) = -(-\mathbf{e}_{23}) = +\mathbf{e}_{23}$, exactly matching $J^{-1}(J(\mathbf{X}) \wedge J(\mathbf{Y})) = \mathbf{e}_{23}$.
+
+We now analyze the transformation of this join under the Euclidean group $E(3)$:
+\begin{enumerate}
+    \item \textbf{Rotations ($R \in \mathrm{Spin}(3)$):}
+    Any 3D spatial rotation is generated by Euclidean bivectors in $\mathcal{G}_{3,0,0}$ and commutes with the degenerate basis vector $\mathbf{e}_0$. Thus, rotations act independently on Euclidean and ideal parts: $R[\mathbf{t}_X + \mathbf{e}_0 \mathbf{p}_X] = R[\mathbf{t}_X] + \mathbf{e}_0 R[\mathbf{p}_X]$. Because the Euclidean join $\vee_{\mathrm{Euc}}$ is strictly $\mathrm{Spin}(3)$-equivariant \citep[Lemma~5]{gatr}, rotating the decomposed terms in Eq.~\ref{eq:pga_join_decomp} directly yields:
+    \begin{equation}
+        R[\mathbf{X} \vee \mathbf{Y}] = R[\mathbf{X}] \vee R[\mathbf{Y}].
+    \end{equation}
+
+    \item \textbf{Translations ($\tau = 1 - \frac{1}{2}\mathbf{e}_0 \mathbf{v}$):}
+    A spatial translation by vector $\mathbf{v} \in \mathbb{R}^3$ acts as a shear on the ideal component through the contraction $\mathbf{v} \rfloor \mathbf{X}$:
+    \begin{equation}
+        \tau[\mathbf{X}] = \mathbf{X} - \mathbf{e}_0 (\mathbf{v} \rfloor \mathbf{X}) = \mathbf{t}_X + \mathbf{e}_0 (\mathbf{p}_X - \mathbf{v} \rfloor \mathbf{t}_X).
+    \end{equation}
+    Substituting $\tau[\mathbf{X}]$ and $\tau[\mathbf{Y}]$ into Eq.~\ref{eq:pga_join_decomp}, the Euclidean component of $\tau[\mathbf{X}] \vee \tau[\mathbf{Y}]$ is:
+    \begin{align}
+        -\Big[ \mathbf{t}_X \vee_{\mathrm{Euc}} (\mathbf{p}_Y - \mathbf{v} \rfloor \mathbf{t}_Y) &+ (-1)^n (\mathbf{p}_X - \mathbf{v} \rfloor \mathbf{t}_X)^\wedge \vee_{\mathrm{Euc}} \mathbf{t}_Y \Big] \nonumber \\
+        &= \underbrace{-\Big( \mathbf{t}_X \vee_{\mathrm{Euc}} \mathbf{p}_Y + (-1)^n \hat{\mathbf{p}}_X \vee_{\mathrm{Euc}} \mathbf{t}_Y \Big)}_{\text{Euclidean component of } \mathbf{X} \vee \mathbf{Y}} \nonumber \\
+        &\quad + \Big( \mathbf{t}_X \vee_{\mathrm{Euc}} (\mathbf{v} \rfloor \mathbf{t}_Y) + (-1)^n \widehat{(\mathbf{v} \rfloor \mathbf{t}_X)} \vee_{\mathrm{Euc}} \mathbf{t}_Y \Big).
+    \end{align}
+    Applying the contraction-join identity \citep[Lemma~6, Eq.~9]{gatr}:
+    \begin{equation}
+        \mathbf{a} \vee_{\mathrm{Euc}} (\mathbf{v} \rfloor \mathbf{b}) = -(-1)^n \widehat{(\mathbf{v} \rfloor \mathbf{a})} \vee_{\mathrm{Euc}} \mathbf{b},
+        \label{eq:gatr_lemma6}
+    \end{equation}
+    where the grade involution is applied to $\mathbf{v} \rfloor \mathbf{a}$, we set $\mathbf{a} = \mathbf{t}_X$ and $\mathbf{b} = \mathbf{t}_Y$. The cross-terms cancel identically to zero:
+    \begin{equation}
+        \mathbf{t}_X \vee_{\mathrm{Euc}} (\mathbf{v} \rfloor \mathbf{t}_Y) + (-1)^n \widehat{(\mathbf{v} \rfloor \mathbf{t}_X)} \vee_{\mathrm{Euc}} \mathbf{t}_Y = 0.
+    \end{equation}
+    Similarly, expanding the ideal component and applying $\mathbf{v} \rfloor (\mathbf{a} \vee_{\mathrm{Euc}} \mathbf{b}) = (\mathbf{v} \rfloor \mathbf{a}) \vee_{\mathrm{Euc}} \mathbf{b}$ \citep[Lemma~6, Eq.~8]{gatr} gives:
+    \begin{align}
+        -\mathbf{e}_0 \Big( (\mathbf{p}_X - \mathbf{v} \rfloor \mathbf{t}_X) \vee_{\mathrm{Euc}} (\mathbf{p}_Y - \mathbf{v} \rfloor \mathbf{t}_Y) \Big)
+        &= -\mathbf{e}_0 (\mathbf{p}_X \vee_{\mathrm{Euc}} \mathbf{p}_Y) - \mathbf{e}_0 \Big( \mathbf{v} \rfloor \langle \mathbf{X} \vee \mathbf{Y} \rangle_{\mathrm{Euc}} \Big),
+    \end{align}
+    since $(\mathbf{v} \rfloor \mathbf{t}_X) \vee_{\mathrm{Euc}} (\mathbf{v} \rfloor \mathbf{t}_Y) = 0$ for parallel trivector blades $\mathbf{t}_X, \mathbf{t}_Y \propto \mathbf{e}_{123}$. Combining the Euclidean and ideal components yields:
+    \begin{equation}
+        \tau[\mathbf{X}] \vee \tau[\mathbf{Y}] = (\mathbf{X} \vee \mathbf{Y}) - \mathbf{e}_0 \big( \mathbf{v} \rfloor (\mathbf{X} \vee \mathbf{Y}) \big) = \tau[\mathbf{X} \vee \mathbf{Y}].
+    \end{equation}
+    For the specific case of two normalized 3D point trivectors $\mathbf{X}_i, \mathbf{X}_j \in \langle \mathcal{G}_{3,0,1} \rangle_3$ representing positions $\mathbf{p}_i, \mathbf{p}_j \in \mathbb{R}^3$, the join evaluates directly to the directed line bivector connecting them:
+    \begin{equation}
+        \mathbf{X}_i \vee \mathbf{X}_j = (\mathbf{p}_j - \mathbf{p}_i) \mathbf{e}_{123} + \mathbf{e}_0 (\mathbf{p}_i \times \mathbf{p}_j) \in \langle \mathcal{G}_{3,0,1} \rangle_2.
+        \label{eq:join_normalized_points}
+    \end{equation}
+    Both terms are bivectors: $(\mathbf{p}_j - \mathbf{p}_i)\mathbf{e}_{123} = (\mathbf{p}_j - \mathbf{p}_i)_x \mathbf{e}_{23} - (\mathbf{p}_j - \mathbf{p}_i)_y \mathbf{e}_{13} + (\mathbf{p}_j - \mathbf{p}_i)_z \mathbf{e}_{12}$ is the Euclidean direction bivector, while $\mathbf{e}_0 (\mathbf{p}_i \times \mathbf{p}_j) = \sum_{k=1}^3 (\mathbf{p}_i \times \mathbf{p}_j)_k \mathbf{e}_{0k}$ is the ideal moment bivector. (Notice that applying a Euclidean dual to the moment before multiplying by $\mathbf{e}_0$ would produce an incorrect trivector grade). Under translation $\mathbf{p} \mapsto \mathbf{p} + \mathbf{t}$, the displacement $(\mathbf{p}_j + \mathbf{t}) - (\mathbf{p}_i + \mathbf{t}) = \mathbf{p}_j - \mathbf{p}_i$ is strictly invariant, while the moment transforms to $\mathbf{e}_0 \big( (\mathbf{p}_i + \mathbf{t}) \times (\mathbf{p}_j + \mathbf{t}) \big) = \mathbf{e}_0 (\mathbf{p}_i \times \mathbf{p}_j) + \mathbf{e}_0 \big( \mathbf{t} \times (\mathbf{p}_j - \mathbf{p}_i) \big)$, which matches the exact action of $\tau$ on the line bivector.
+    Together, rotational and translational equivariance establish statement (1): the bare join is strictly $SE(3)$-equivariant.
+
+    \item \textbf{Reflections and Equivariant Join ($V \in \mathrm{Pin}(3,0,1)$):}
+    Under an improper isometry (spatial reflection $V$ with spatial orthogonal matrix $R \in O(3)$ such that $\det(R) = -1$), the Euclidean join $\vee_{\mathrm{Euc}}$ in odd spatial dimension $n=3$ changes sign by $(-1)^n = -1$ \citep[Lemma~5]{gatr}, yielding statement (2):
+    \begin{equation}
+        \rho_V(\mathbf{X}_i) \vee \rho_V(\mathbf{X}_j) = \det(R) \, \rho_V(\mathbf{X}_i \vee \mathbf{X}_j) = -\rho_V(\mathbf{X}_i \vee \mathbf{X}_j).
+    \end{equation}
+    To establish statement (3) for the reference-modulated equivariant join $\mathrm{EquiJoin}(\mathbf{X}_i, \mathbf{X}_j; \mathbf{Z}_{\text{ref}}) = z_{\text{ref}} (\mathbf{X}_i \vee \mathbf{X}_j)$ \citep{gatr}, where $z_{\text{ref}} = \langle \mathbf{Z}_{\text{ref}} \rangle_{123} \in \mathbb{R}$ is the Euclidean orientation scalar from a reference multivector $\mathbf{Z}_{\text{ref}}$: under versor conjugation $\rho_V$, the coefficient on the Euclidean orientation blade transforms as:
+    \begin{equation}
+        \langle \rho_V(\mathbf{Z}_{\text{ref}}) \rangle_{123} = \det(R) \langle \mathbf{Z}_{\text{ref}} \rangle_{123}.
+    \end{equation}
+    Crucially, while the $\mathbf{e}_{123}$ blade itself acquires ideal components under translations ($\tau[\mathbf{e}_{123}] = \mathbf{e}_{123} - \mathbf{e}_0 (\mathbf{v} \rfloor \mathbf{e}_{123})$), its projection onto $\mathbf{e}_{123}$ is purely scaled by $\det(R)$. Therefore:
+    \begin{align}
+        \mathrm{EquiJoin}(\rho_V(\mathbf{X}_i), \rho_V(\mathbf{X}_j); \rho_V(\mathbf{Z}_{\text{ref}}))
+        &= \langle \rho_V(\mathbf{Z}_{\text{ref}}) \rangle_{123} \big( \rho_V(\mathbf{X}_i) \vee \rho_V(\mathbf{X}_j) \big) \nonumber \\
+        &= \big( \det(R) z_{\text{ref}} \big) \big( \det(R) \rho_V(\mathbf{X}_i \vee \mathbf{X}_j) \big) \nonumber \\
+        &= \det(R)^2 \, z_{\text{ref}} \rho_V(\mathbf{X}_i \vee \mathbf{X}_j) \nonumber \\
+        &= \rho_V(\mathbf{E}_{ij}),
+    \end{align}
+    since $\det(R)^2 = (-1)^2 = +1$. This cancels the parity sign under reflections and establishes strict $E(3)$ equivariance across the entire Pin group $\mathrm{Pin}(3,0,1)$.
+\end{enumerate}
+\end{proof}
+
+\begin{lemma}[Equivariance of Projective Coordinate Readout]
+\label{lem:point_readout_equivariance}
+Let $\mathbf{X} \in \langle \mathcal{G}_{3,0,1} \rangle_3$ be a point trivector representing a spatial position $\mathbf{p} = (x, y, z)^\top \in \mathbb{R}^3$ via:
+\begin{equation}
+    \mathbf{X} = w \mathbf{e}_{123} - x \mathbf{e}_{023} + y \mathbf{e}_{013} - z \mathbf{e}_{012},
+\end{equation}
+with homogeneous scale $w \neq 0$. The de-homogenized coordinate extraction mapping $\mathrm{extract\_point}: \langle \mathcal{G}_{3,0,1} \rangle_3 \to \mathbb{R}^3$ defined in Eq.~\ref{eq:extract_point}:
+\begin{equation}
+    \hat{\mathbf{p}} = \mathrm{extract\_point}(\mathbf{X}) = \left( -\frac{\langle \mathbf{X} \rangle_{023}}{\langle \mathbf{X} \rangle_{123}},\, \frac{\langle \mathbf{X} \rangle_{013}}{\langle \mathbf{X} \rangle_{123}},\, -\frac{\langle \mathbf{X} \rangle_{012}}{\langle \mathbf{X} \rangle_{123}} \right)^\top,
+\end{equation}
+is strictly $E(3)$-equivariant under any Euclidean isometry $g = (R, \mathbf{t}) \in E(3)$ parameterized by a versor $V \in \mathrm{Pin}(3,0,1)$:
+\begin{equation}
+    \mathrm{extract\_point}(\rho_V(\mathbf{X})) = R \, \mathrm{extract\_point}(\mathbf{X}) + \mathbf{t}.
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Recall that any Euclidean isometry $g = (R, \mathbf{t}) \in E(3)$ decomposes into a translation $T \in \mathrm{Spin}^+(3,0,1)$, a proper rotation $R \in \mathrm{Spin}^+(3,0,0)$, and optionally a spatial reflection across a plane $V_{\mathbf{n}} \in \mathrm{Pin}(3,0,1) \setminus \mathrm{Spin}^+(3,0,1)$. We analyze the algebraic transformation of the point trivector $\mathbf{X}$ under each generator separately.
+
+We write $\mathbf{X} = w \mathbf{e}_{123} + \mathbf{X}_{\text{ideal}}$, where $\mathbf{X}_{\text{ideal}} = -x \mathbf{e}_{023} + y \mathbf{e}_{013} - z \mathbf{e}_{012}$ contains only ideal blades with the degenerate vector $\mathbf{e}_0$, and $w \mathbf{e}_{123}$ is the non-degenerate homogeneous coordinate. Factoring out $\mathbf{e}_0$, the ideal part can be written in terms of the Euclidean Cartesian vector $\mathbf{p} = x \mathbf{e}_1 + y \mathbf{e}_2 + z \mathbf{e}_3$ as:
+\begin{equation}
+    \mathbf{X}_{\text{ideal}} = -\mathbf{e}_0 \mathbf{p} \mathbf{e}_{123}.
+\end{equation}
+To verify this identity, compute directly: $-\mathbf{e}_0 (x \mathbf{e}_1 + y \mathbf{e}_2 + z \mathbf{e}_3) \mathbf{e}_{123} = -\mathbf{e}_0 (x \mathbf{e}_{23} - y \mathbf{e}_{13} + z \mathbf{e}_{12}) = -x \mathbf{e}_{023} + y \mathbf{e}_{013} - z \mathbf{e}_{012}$. Note that by definition, $\mathrm{extract\_point}(\mathbf{X}) = \mathbf{p}/w$.
+
+\paragraph{1. Translation Equivariance.}
+A spatial translation by displacement vector $\mathbf{t} = (t_x, t_y, t_z)^\top \in \mathbb{R}^3$ is generated by the translator:
+\begin{equation}
+    T = 1 - \frac{1}{2}\mathbf{t}_\infty = 1 - \frac{1}{2}(t_x \mathbf{e}_{01} + t_y \mathbf{e}_{02} + t_z \mathbf{e}_{03}).
+\end{equation}
+Since $\mathbf{e}_{0k}$ are grade-2 bivectors, their reversion satisfies $\widetilde{\mathbf{e}}_{0k} = -\mathbf{e}_{0k}$, giving $\widetilde{T} = 1 + \frac{1}{2}\mathbf{t}_\infty$.
+The translator acts via the sandwich product $\rho_T(\mathbf{X}) = T \mathbf{X} \widetilde{T}$.
+\begin{itemize}
+    \item \emph{Action on the ideal part $\mathbf{X}_{\text{ideal}}$:} Because all blades in $\mathbf{t}_\infty$ and $\mathbf{X}_{\text{ideal}}$ contain the degenerate generator $\mathbf{e}_0$, and $\mathbf{e}_0^2 = 0$, any product of two ideal elements vanishes identically: $\mathbf{t}_\infty \mathbf{X}_{\text{ideal}} = \mathbf{X}_{\text{ideal}} \mathbf{t}_\infty = 0$ and $\mathbf{t}_\infty^2 = 0$. Consequently:
+    \begin{equation}
+        T \mathbf{X}_{\text{ideal}} \widetilde{T} = \left(1 - \frac{1}{2}\mathbf{t}_\infty\right) \mathbf{X}_{\text{ideal}} \left(1 + \frac{1}{2}\mathbf{t}_\infty\right) = \mathbf{X}_{\text{ideal}}.
+    \end{equation}
+    The ideal spatial components are unperturbed by the direct sandwiching.
+    \item \emph{Action on the homogeneous blade $w \mathbf{e}_{123}$:}
+    Using the canonical basis relations, each bivector $\mathbf{e}_{0k}$ anticommutes with $\mathbf{e}_{123}$:
+    \begin{equation}
+        \mathbf{e}_{123} \mathbf{e}_{01} = \mathbf{e}_1 \mathbf{e}_2 \mathbf{e}_3 \mathbf{e}_0 \mathbf{e}_1 = -\mathbf{e}_0 \mathbf{e}_2 \mathbf{e}_3 = -\mathbf{e}_{023} = -\mathbf{e}_{01} \mathbf{e}_{123},
+    \end{equation}
+    and similarly $\mathbf{e}_{123} \mathbf{e}_{02} = -\mathbf{e}_{02} \mathbf{e}_{123}$ and $\mathbf{e}_{123} \mathbf{e}_{03} = -\mathbf{e}_{03} \mathbf{e}_{123}$. Therefore, $\mathbf{e}_{123} \mathbf{t}_\infty = -\mathbf{t}_\infty \mathbf{e}_{123}$.
+    This yields:
+    \begin{equation}
+        \mathbf{e}_{123} \widetilde{T} = \mathbf{e}_{123} \left(1 + \frac{1}{2}\mathbf{t}_\infty\right) = \mathbf{e}_{123} - \frac{1}{2}\mathbf{t}_\infty \mathbf{e}_{123} = \left(1 - \frac{1}{2}\mathbf{t}_\infty\right) \mathbf{e}_{123} = T \mathbf{e}_{123}.
+    \end{equation}
+    Substituting this into the sandwich product:
+    \begin{align}
+        T (w \mathbf{e}_{123}) \widetilde{T} 
+        &= w T^2 \mathbf{e}_{123} = w \left(1 - \frac{1}{2}\mathbf{t}_\infty\right)^2 \mathbf{e}_{123} \nonumber \\
+        &= w \left(1 - \mathbf{t}_\infty + \frac{1}{4}\mathbf{t}_\infty^2\right) \mathbf{e}_{123} = w (1 - \mathbf{t}_\infty) \mathbf{e}_{123} \nonumber \\
+        &= w \mathbf{e}_{123} - w \mathbf{t}_\infty \mathbf{e}_{123}.
+    \end{align}
+    Multiplying out $\mathbf{t}_\infty \mathbf{e}_{123}$ using Table~\ref{tab:cayley}:
+    \begin{equation}
+        -w \mathbf{t}_\infty \mathbf{e}_{123} = -w(t_x \mathbf{e}_{01} + t_y \mathbf{e}_{02} + t_z \mathbf{e}_{03})\mathbf{e}_{123} = -w t_x \mathbf{e}_{023} + w t_y \mathbf{e}_{013} - w t_z \mathbf{e}_{012}.
+    \end{equation}
+\end{itemize}
+Combining the ideal and homogeneous parts, the translated multivector is:
+\begin{equation}
+    \rho_T(\mathbf{X}) = w \mathbf{e}_{123} - (x + w t_x)\mathbf{e}_{023} + (y + w t_y)\mathbf{e}_{013} - (z + w t_z)\mathbf{e}_{012}.
+\end{equation}
+Notice that the homogeneous scale $\langle \rho_T(\mathbf{X}) \rangle_{123} = w$ remains strictly invariant under translations. Evaluating $\mathrm{extract\_point}(\rho_T(\mathbf{X}))$:
+\begin{align}
+    \hat{x}' &= -\frac{-(x + w t_x)}{w} = \frac{x}{w} + t_x = \hat{x} + t_x, \nonumber \\
+    \hat{y}' &= \frac{y + w t_y}{w} = \frac{y}{w} + t_y = \hat{y} + t_y, \nonumber \\
+    \hat{z}' &= -\frac{-(z + w t_z)}{w} = \frac{z}{w} + t_z = \hat{z} + t_z,
+\end{align}
+which proves $\mathrm{extract\_point}(\rho_T(\mathbf{X})) = \hat{\mathbf{p}} + \mathbf{t}$.
+
+\paragraph{2. Rotation Equivariance.}
+A spatial rotation by angle $\theta$ around a Euclidean axis is represented by an even rotor $R = \cos(\theta/2) - \sin(\theta/2)\mathbf{l} \in \mathrm{Spin}^+(3,0,0)$ with unit bivector $\mathbf{l} \in \mathrm{span}\{\mathbf{e}_{12}, \mathbf{e}_{13}, \mathbf{e}_{23}\}$ and $R \widetilde{R} = 1$.
+\begin{itemize}
+    \item \emph{Homogeneous component:} In Euclidean 3D geometric algebra, the pseudoscalar $\mathbf{e}_{123}$ commutes with all even multivectors. For any basis bivector $\mathbf{e}_{ij}$, $\mathbf{e}_{123} \mathbf{e}_{ij} = \mathbf{e}_{ij} \mathbf{e}_{123}$. Therefore, $R \mathbf{e}_{123} = \mathbf{e}_{123} R$, which yields:
+    \begin{equation}
+        \rho_R(w \mathbf{e}_{123}) = R (w \mathbf{e}_{123}) \widetilde{R} = w \mathbf{e}_{123} R \widetilde{R} = w \mathbf{e}_{123}.
+    \end{equation}
+    Thus, the homogeneous scale $\langle \rho_R(\mathbf{X}) \rangle_{123} = w$ is strictly invariant under rotations.
+    \item \emph{Ideal spatial components:} Since the rotor $R$ is constructed solely from Euclidean basis vectors $\{\mathbf{e}_1, \mathbf{e}_2, \mathbf{e}_3\}$ and contains an even number of vector factors, it commutes with the degenerate basis vector $\mathbf{e}_0$: $R \mathbf{e}_0 = \mathbf{e}_0 R$.
+    Using the identity $\mathbf{X}_{\text{ideal}} = -\mathbf{e}_0 \mathbf{p} \mathbf{e}_{123}$:
+    \begin{equation}
+        \rho_R(\mathbf{X}_{\text{ideal}}) = R (-\mathbf{e}_0 \mathbf{p} \mathbf{e}_{123}) \widetilde{R} = -\mathbf{e}_0 (R \mathbf{p} \widetilde{R}) \mathbf{e}_{123}.
+    \end{equation}
+    In standard geometric algebra, $R \mathbf{p} \widetilde{R} = \mathbf{p}' = (x', y', z')^\top = R_{\text{mat}} \mathbf{p}$ is precisely the rotated 3D Cartesian vector. Thus:
+    \begin{equation}
+        \rho_R(\mathbf{X}_{\text{ideal}}) = -\mathbf{e}_0 \mathbf{p}' \mathbf{e}_{123} = -x' \mathbf{e}_{023} + y' \mathbf{e}_{013} - z' \mathbf{e}_{012}.
+    \end{equation}
+\end{itemize}
+De-homogenizing by dividing by $w$ produces:
+\begin{equation}
+    \mathrm{extract\_point}(\rho_R(\mathbf{X})) = \frac{\mathbf{p}'}{w} = R_{\text{mat}} \left(\frac{\mathbf{p}}{w}\right) = R_{\text{mat}} \hat{\mathbf{p}}.
+\end{equation}
+
+\paragraph{3. Reflection Equivariance.}
+Consider a spatial reflection across a plane passing through the origin with unit normal $\mathbf{n} = n_x \mathbf{e}_1 + n_y \mathbf{e}_2 + n_z \mathbf{e}_3$ ($\mathbf{n}^2 = 1$). The transformation is generated by the odd 1-versor $V = \mathbf{n} \in \langle \mathcal{G}_{3,0,1} \rangle_1$ with $\widetilde{\mathbf{n}} = \mathbf{n}$.
+Under the linear group representation (Eq.~\ref{eq:versor_action}) for odd versors, the action on any trivector $\mathbf{X}$ involves the grade involution $\widehat{\mathbf{X}} = (-1)^3 \mathbf{X} = -\mathbf{X}$:
+\begin{equation}
+    \rho_{\mathbf{n}}(\mathbf{X}) = \mathbf{n} \widehat{\mathbf{X}} \widetilde{\mathbf{n}} = \mathbf{n} (-\mathbf{X}) \mathbf{n} = -\mathbf{n} \mathbf{X} \mathbf{n}.
+\end{equation}
+We evaluate $-\mathbf{n} \mathbf{X} \mathbf{n}$ on the two components:
+\begin{itemize}
+    \item \emph{Homogeneous component:} In 3D, any Euclidean 1-vector $\mathbf{n}$ commutes with the Euclidean pseudoscalar $\mathbf{e}_{123}$ ($\mathbf{n} \mathbf{e}_{123} = \mathbf{e}_{123} \mathbf{n}$). Therefore:
+    \begin{equation}
+        \rho_{\mathbf{n}}(w \mathbf{e}_{123}) = -w \mathbf{n} \mathbf{e}_{123} \mathbf{n} = -w \mathbf{e}_{123} \mathbf{n}^2 = -w \mathbf{e}_{123}.
+    \end{equation}
+    The homogeneous coordinate flips sign: $\langle \rho_{\mathbf{n}}(\mathbf{X}) \rangle_{123} = -w$.
+    \item \emph{Ideal spatial components:} Being a 1-vector, $\mathbf{n}$ anticommutes with the degenerate vector: $\mathbf{n} \mathbf{e}_0 = -\mathbf{e}_0 \mathbf{n}$.
+    Substituting $\mathbf{X}_{\text{ideal}} = -\mathbf{e}_0 \mathbf{p} \mathbf{e}_{123}$:
+    \begin{align}
+        \rho_{\mathbf{n}}(\mathbf{X}_{\text{ideal}}) 
+        &= -\mathbf{n} (-\mathbf{e}_0 \mathbf{p} \mathbf{e}_{123}) \mathbf{n} = \mathbf{n} \mathbf{e}_0 \mathbf{p} \mathbf{e}_{123} \mathbf{n} \nonumber \\
+        &= -\mathbf{e}_0 \mathbf{n} \mathbf{p} \mathbf{n} \mathbf{e}_{123} = \mathbf{e}_0 (-\mathbf{n} \mathbf{p} \mathbf{n}) \mathbf{e}_{123}.
+    \end{align}
+    In geometric algebra, $-\mathbf{n} \mathbf{p} \mathbf{n} = \mathbf{p} - 2(\mathbf{p} \cdot \mathbf{n})\mathbf{n} = \mathbf{p}'$ is the Householder reflection of the position vector $\mathbf{p}$ across the plane with normal $\mathbf{n}$.
+    Writing $\mathbf{p}' = (x', y', z')^\top$:
+    \begin{equation}
+        \rho_{\mathbf{n}}(\mathbf{X}_{\text{ideal}}) = \mathbf{e}_0 \mathbf{p}' \mathbf{e}_{123} = -(-\mathbf{e}_0 \mathbf{p}' \mathbf{e}_{123}) = -(-x' \mathbf{e}_{023} + y' \mathbf{e}_{013} - z' \mathbf{e}_{012}).
+    \end{equation}
+    Each ideal spatial blade also acquires an overall sign flip $(-1)$.
+\end{itemize}
+When evaluating the projective de-homogenization $\mathrm{extract\_point}(\rho_{\mathbf{n}}(\mathbf{X}))$:
+\begin{align}
+    \hat{x}' &= -\frac{-(-x')}{-w} = \frac{-x'}{-w} = \frac{x'}{w}, \nonumber \\
+    \hat{y}' &= \frac{-y'}{-w} = \frac{y'}{w}, \nonumber \\
+    \hat{z}' &= -\frac{-(-z')}{-w} = \frac{-z'}{-w} = \frac{z'}{w}.
+\end{align}
+The two parity negative signs in the numerator and denominator cancel identically:
+\begin{equation}
+    \mathrm{extract\_point}(\rho_{\mathbf{n}}(\mathbf{X})) = \frac{\mathbf{p}'}{w} = R_{\mathbf{n}} \hat{\mathbf{p}}.
+\end{equation}
+Since any rigid Euclidean isometry $g \in E(3)$ is a composition of translations, rotations, and reflections, induction over group generators confirms that $\mathrm{extract\_point}(\rho_V(\mathbf{X})) = R \hat{\mathbf{p}} + \mathbf{t}$ holds universally for all $g = (R, \mathbf{t}) \in E(3)$.
+\end{proof}
+
+\subsection{Energy Conservation and Force Field Equivariance}
+
+\begin{lemma}[Energy Conservation and Force Field Equivariance]
+\label{lem:force_conservation}
+Let $E(\mathbf{p}_1, \dots, \mathbf{p}_N) \in \mathbb{R}$ be an $E(3)$-invariant total potential energy function: $E(R\mathbf{p}_1 + \mathbf{t}, \dots, R\mathbf{p}_N + \mathbf{t}) = E(\mathbf{p}_1, \dots, \mathbf{p}_N)$ for all $(R, \mathbf{t}) \in E(3)$. 
+Then the derived atomic force vector field $\mathbf{F}_i = -\nabla_{\mathbf{p}_i} E$ is:
+\begin{enumerate}
+    \item Strictly conservative: $\nabla_{\mathbf{p}_i} \times \mathbf{F}_i = \mathbf{0}$;
+    \item Strictly $E(3)$-equivariant: $\mathbf{F}_i(R\mathbf{p} + \mathbf{t}) = R \mathbf{F}_i(\mathbf{p})$.
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+Condition (1) follows from Poincaré's lemma: the curl of any exact gradient field vanishes identically ($\mathrm{curl}(\mathrm{grad}(E)) = \mathbf{0}$), ensuring that line integrals of force are path-independent and energy is conserved.
+
+For condition (2), let $\mathbf{p}'_i = R \mathbf{p}_i + \mathbf{t}$. By the multivariate chain rule:
+\begin{equation}
+    \mathbf{F}_i(\mathbf{p}') = -\frac{\partial E(\mathbf{p}')}{\partial \mathbf{p}'_i} = -\left( \frac{\partial \mathbf{p}_i}{\partial \mathbf{p}'_i} \right)^\top \frac{\partial E(\mathbf{p})}{\partial \mathbf{p}_i}.
+\end{equation}
+Since $\mathbf{p}'_i = R\mathbf{p}_i + \mathbf{t}$, we have $\mathbf{p}_i = R^\top(\mathbf{p}'_i - \mathbf{t})$, so the Jacobian is $\frac{\partial \mathbf{p}_i}{\partial \mathbf{p}'_i} = R^\top$. Because $R \in O(3)$ is orthogonal, $(R^\top)^\top = R$. Therefore:
+\begin{equation}
+    \mathbf{F}_i(\mathbf{p}') = -R \frac{\partial E(\mathbf{p})}{\partial \mathbf{p}_i} = R \mathbf{F}_i(\mathbf{p}),
+\end{equation}
+which proves strict $E(3)$ equivariance of the molecular force field.
+\end{proof}
+
+
+\section{Projective Geometric Algebra (\texorpdfstring{$\mathcal{G}_{3,0,1}$}{G(3,0,1)}) Mathematical Reference}
+\label{app:pga_reference}
+
+\subsection{Canonical Basis Blade Enumeration}
+
+Throughout this work, the 16-dimensional multivector linear space of $\mathcal{G}_{3,0,1}$ is spanned by the ordered basis blades $\mathcal{B} = \{ \mathbf{e}_A \}_{A=0}^{15}$ organized by grade:
+\begin{table}[!ht]
+\centering
+\caption{Canonical 16-element basis blade enumeration of $\mathcal{G}_{3,0,1}$.}
+\label{tab:basis_enumeration}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lccll}
+\toprule
+\textbf{Blade} & \textbf{Index} & \textbf{Grade} & \textbf{Metric Square} & \textbf{Physical / Geometric Representation} \\
+\midrule
+$1$ & 0 & 0 & $+1$ & Scalar (mass, charge, energy, invariant attention weights) \\
+$\mathbf{e}_0$ & 1 & 1 & $0$ (ideal) & Ideal plane at infinity (homogeneous coordinate) \\
+$\mathbf{e}_1$ & 2 & 1 & $+1$ & Coordinate plane $x=0$ \\
+$\mathbf{e}_2$ & 3 & 1 & $+1$ & Coordinate plane $y=0$ \\
+$\mathbf{e}_3$ & 4 & 1 & $+1$ & Coordinate plane $z=0$ \\
+$\mathbf{e}_{01}$ & 5 & 2 & $0$ (ideal) & Ideal line along $x$; translation generator; momentum \\
+$\mathbf{e}_{02}$ & 6 & 2 & $0$ (ideal) & Ideal line along $y$; translation generator; momentum \\
+$\mathbf{e}_{03}$ & 7 & 2 & $0$ (ideal) & Ideal line along $z$; translation generator; momentum \\
+$\mathbf{e}_{12}$ & 8 & 2 & $-1$ & Euclidean line parallel to $z$-axis; rotation generator \\
+$\mathbf{e}_{13}$ & 9 & 2 & $-1$ & Euclidean line parallel to $y$-axis; rotation generator \\
+$\mathbf{e}_{23}$ & 10 & 2 & $-1$ & Euclidean line parallel to $x$-axis; rotation generator \\
+$\mathbf{e}_{012}$ & 11 & 3 & $0$ (ideal) & Spatial point coordinate ($z$-component) \\
+$\mathbf{e}_{013}$ & 12 & 3 & $0$ (ideal) & Spatial point coordinate ($y$-component) \\
+$\mathbf{e}_{023}$ & 13 & 3 & $0$ (ideal) & Spatial point coordinate ($x$-component) \\
+$\mathbf{e}_{123}$ & 14 & 3 & $-1$ & Origin point; homogeneous weight $w=1$ \\
+$\mathbf{e}_{0123}$ & 15 & 4 & $0$ (ideal) & Pseudoscalar $I$; 4D homogeneous volume \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Cayley Multiplication Table of \texorpdfstring{$\mathcal{G}_{3,0,1}$}{G(3,0,1)}}
+
+The geometric product of any two basis blades $\mathbf{e}_A, \mathbf{e}_B \in \mathcal{B}$ satisfies the canonical Clifford relations: $\mathbf{e}_i^2 = +1$ ($i \in \{1,2,3\}$), $\mathbf{e}_0^2 = 0$, and $\mathbf{e}_i \mathbf{e}_j = -\mathbf{e}_j \mathbf{e}_i$ ($i \neq j$). 
+Table~\ref{tab:cayley} provides the complete $16 \times 16$ multiplication table of $\mathcal{G}_{3,0,1}$.
+
+\begin{table*}[!ht]
+\centering
+\caption{Complete Cayley multiplication table for 3D Plane-based Projective Geometric Algebra $\mathcal{G}_{3,0,1}$. Row entries multiply column entries from the left ($\mathbf{e}_{\text{row}} \mathbf{e}_{\text{col}}$).}
+\label{tab:cayley}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{c|cccccccccccccccc}
+\toprule
+$\mathbf{A} \mathbf{B}$ & $1$ & $\mathbf{e}_0$ & $\mathbf{e}_1$ & $\mathbf{e}_2$ & $\mathbf{e}_3$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{03}$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{13}$ & $\mathbf{e}_{23}$ & $\mathbf{e}_{012}$ & $\mathbf{e}_{013}$ & $\mathbf{e}_{023}$ & $\mathbf{e}_{123}$ & $\mathbf{e}_{0123}$ \\
+\midrule
+$1$ & $1$ & $\mathbf{e}_0$ & $\mathbf{e}_1$ & $\mathbf{e}_2$ & $\mathbf{e}_3$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{03}$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{13}$ & $\mathbf{e}_{23}$ & $\mathbf{e}_{012}$ & $\mathbf{e}_{013}$ & $\mathbf{e}_{023}$ & $\mathbf{e}_{123}$ & $\mathbf{e}_{0123}$ \\
+$\mathbf{e}_0$ & $\mathbf{e}_0$ & $0$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{03}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{012}$ & $\mathbf{e}_{013}$ & $\mathbf{e}_{023}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{0123}$ & $0$ \\
+$\mathbf{e}_1$ & $\mathbf{e}_1$ & $-\mathbf{e}_{01}$ & $1$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_2$ & $\mathbf{e}_3$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{02}$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{023}$ \\
+$\mathbf{e}_2$ & $\mathbf{e}_2$ & $-\mathbf{e}_{02}$ & $-\mathbf{e}_{12}$ & $1$ & $\mathbf{e}_{23}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $-\mathbf{e}_1$ & $-\mathbf{e}_{123}$ & $\mathbf{e}_3$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{013}$ \\
+$\mathbf{e}_3$ & $\mathbf{e}_3$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{13}$ & $-\mathbf{e}_{23}$ & $1$ & $\mathbf{e}_{013}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_1$ & $-\mathbf{e}_2$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{12}$ & $-\mathbf{e}_{012}$ \\
+$\mathbf{e}_{01}$ & $\mathbf{e}_{01}$ & $0$ & $\mathbf{e}_0$ & $\mathbf{e}_{012}$ & $\mathbf{e}_{013}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{03}$ & $\mathbf{e}_{0123}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{023}$ & $0$ \\
+$\mathbf{e}_{02}$ & $\mathbf{e}_{02}$ & $0$ & $-\mathbf{e}_{012}$ & $\mathbf{e}_0$ & $\mathbf{e}_{023}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{01}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{03}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{013}$ & $0$ \\
+$\mathbf{e}_{03}$ & $\mathbf{e}_{03}$ & $0$ & $-\mathbf{e}_{013}$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_0$ & $0$ & $0$ & $0$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{01}$ & $-\mathbf{e}_{02}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{012}$ & $0$ \\
+$\mathbf{e}_{12}$ & $\mathbf{e}_{12}$ & $-\mathbf{e}_{012}$ & $-\mathbf{e}_2$ & $\mathbf{e}_1$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $-1$ & $-\mathbf{e}_{23}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $\mathbf{e}_{03}$ \\
+$\mathbf{e}_{13}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $-\mathbf{e}_{123}$ & $\mathbf{e}_1$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{23}$ & $-1$ & $-\mathbf{e}_{12}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $\mathbf{e}_2$ & $-\mathbf{e}_{02}$ \\
+$\mathbf{e}_{23}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $-1$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_1$ & $\mathbf{e}_{01}$ \\
+$\mathbf{e}_{012}$ & $\mathbf{e}_{012}$ & $0$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{03}$ & $0$ \\
+$\mathbf{e}_{013}$ & $\mathbf{e}_{013}$ & $0$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{02}$ & $0$ \\
+$\mathbf{e}_{023}$ & $\mathbf{e}_{023}$ & $0$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{01}$ & $0$ \\
+$\mathbf{e}_{123}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $-\mathbf{e}_1$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{01}$ & $-1$ & $\mathbf{e}_0$ \\
+$\mathbf{e}_{0123}$ & $\mathbf{e}_{0123}$ & $0$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{01}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_0$ & $0$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\section{Hyperparameters, Training Protocols, and Compute Infrastructure}
+\label{app:training_details}
+\label{app:hyperparameters}
+
+Table~\ref{tab:hyperparameters} reports the complete hyperparameter settings used across all benchmark experiments. All models were implemented in PyTorch and trained with mixed-precision arithmetic.
+
+\begin{table*}[!ht]
+\centering
+\caption{Comprehensive hyperparameter configurations of PGA-GNN across all experimental benchmarks.}
+\label{tab:hyperparameters}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Hyperparameter} & \textbf{N-Body Dynamics} & \textbf{Interacting Springs} & \textbf{Revised MD17} & \textbf{QM9 Property Prediction} \\
+\midrule
+Number of Layers ($L$) & 2 & 2 & 6 & 3 \\
+Multivector Channels ($C$) & 64 & 64 & 64 & 32 \\
+Scalar Channels ($S$) & 128 & 128 & 128 & 64 \\
+Attention Heads ($H$) & 8 & 8 & 8 & 8 \\
+Attention Mechanism & Geometric & Geometric & Geometric & Geometric \\
+Message Formulation & Distributive GP & Distributive GP & Distributive GP & Distributive GP \\
+Radial Cutoff ($r_{\text{cut}}$) & None (Dense) & None (Sparse Graph) & $5.0\text{ \AA}$ & $5.0\text{ \AA}$ \\
+RBF Distance Expansion & 64 Gaussians & 64 Gaussians & 64 Gaussians & 64 Gaussians \\
+Total Parameters & $606\text{k}$ & $606\text{k}$ & $2.3\text{M}$ & $1.0\text{M}$ \\
+\midrule
+Optimizer & AdamW & AdamW & AdamW & AdamW \\
+Initial Learning Rate & $3 \times 10^{-4}$ & $3 \times 10^{-4}$ & $1 \times 10^{-3}$ & $5 \times 10^{-4}$ \\
+Minimum Learning Rate & $3 \times 10^{-6}$ & $3 \times 10^{-6}$ & $1 \times 10^{-6}$ & $1 \times 10^{-6}$ \\
+Learning Rate Schedule & Cosine Warmup (2k steps) & Cosine Warmup (2k steps) & Cosine Annealing & Cosine Annealing \\
+Weight Decay & $1 \times 10^{-6}$ & $1 \times 10^{-6}$ & $5 \times 10^{-7}$ & $1 \times 10^{-2}$ \\
+Batch Size & 64 & 64 & 32 & 256 \\
+Training Budget & 50,000 steps & 50,000 steps & 3500 epochs & 1000 epochs \\
+EMA Decay Rate & None & None & $0.999$ & $0.999$ \\
+SWA Trigger Epoch & None & None & 3000 & None \\
+Loss Formulation & MSE (Eq.~\ref{eq:loss_nbody}) & MSE (Eq.~\ref{eq:loss_nbody}) & Weighted MSE ($\lambda_F=1000, \lambda_E=1$) & Normalized MAE (Eq.~\ref{eq:loss_qm9}) \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+\subsection{Compute Infrastructure and Efficiency Profiling}
+\label{app:compute}
+
+Benchmark experiments were executed on a high-performance computing cluster equipped with NVIDIA A100 40GB GPUs running PyTorch 2.8 and CUDA 12.8.
+Model computational complexity and theoretical efficiency were rigorously evaluated on the N-body Spring benchmark ($B=64$ systems of $N=15$ interacting bodies) by measuring forward-pass floating-point operations (FLOPs) using PyTorch's \texttt{FlopCounterMode}, alongside total trainable parameter footprints. These measurements establish the empirical Pareto efficiency frontiers reported in Section~\ref{subsec:pareto_efficiency} and Figure~\ref{fig:flops}.
+
+To complement these hardware-agnostic theoretical metrics, Table~\ref{tab:benchmarks_hardware} reports empirical wall-clock inference latency (averaged over 50 forward passes following 10 warmup iterations) and peak allocated CUDA memory measured on an NVIDIA A100 GPU for a batch of $B=64$ systems.
+
+\begin{table*}[!ht]
+\centering
+\caption{Comprehensive computational efficiency and generalization benchmark on the N-body Spring system ($B=64$, $N=15$, 100 training examples). Latency and peak memory figures were profiled on an NVIDIA A100 GPU under PyTorch 2.8. Metrics report mean $\pm$ standard deviation across evaluation runs.}
+\label{tab:benchmarks_hardware}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Model} & \textbf{Parameters} & \textbf{FLOPs} & \textbf{Inference Latency (ms)} & \textbf{Peak Memory (MB)} & \textbf{Test OOD MSE} \\
+\midrule
+\textbf{PGA-GNN (Ours)} & $606\text{k}$ & $\mathbf{6.795\text{ G}}$ & $86.27 \pm 0.39$ & $347.1$ & $\mathbf{(2.02 \pm 0.21) \times 10^{-6}}$ \\
+GATr           & $2.21\text{M}$ & $25.033\text{ G}$ & $62.03 \pm 1.68$ & $50.0$  & $(2.33 \pm 0.08) \times 10^{-3}$ \\
+EGNN           & $134\text{k}$ & $2.043\text{ G}$  & $4.66 \pm 0.02$  & $48.3$  & $(5.91 \pm 0.02) \times 10^{-3}$ \\
+SEGNN          & $147\text{k}$ & $3.079\text{ G}$  & $26.14 \pm 0.05$ & $107.7$ & $(7.26 \pm 0.07) \times 10^{-4}$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\paragraph{Analysis of Hardware-Dependent Profiling.}
+The empirical measurements highlight key practical trade-offs between dense set transformers and sparse geometric graph message passing:
+\begin{enumerate}
+    \item \textbf{Peak Memory Allocation:} PGA-GNN records a peak allocated memory of $347.1\text{ MB}$, compared to $50.0\text{ MB}$ for GATr. A primary contributing factor is that PGA-GNN maintains a larger multivector channel capacity ($C=64$) and explicitly conditions messages on geometric edge multivectors ($\mathbf{E}_{ij}$) and 64-dimensional RBF distance expansions across all directed edges ($B \times N^2$), which requires materializing intermediate edge-level interaction tensors. In contrast, GATr operates over node multivector sets with smaller channel capacity ($C=16$) without materializing explicit edge feature tensors. In absolute terms, $347.1\text{ MB}$ represents less than $1\%$ of available A100 GPU memory, posing no barrier to execution.
+    \item \textbf{Inference Latency vs.\ Theoretical FLOPs:} Despite PGA-GNN requiring nearly $3.7\times$ fewer arithmetic operations than GATr ($6.795\text{ G}$ vs.\ $25.033\text{ GFLOPs}$), GATr achieves lower wall-clock latency ($62.03\text{ ms}$ vs.\ $86.27\text{ ms}$) on this $N=15$ system. We hypothesize that on small systems ($N=15$), dense set attention can execute efficiently via regular batched matrix operations, whereas graph message passing incurs overhead from index gathering, scatter reductions, and custom multivector message construction. Table~\ref{tab:benchmarks_hardware} thus provides a transparent view of this trade-off: GATr provides faster wall-clock execution on small node sets, while PGA-GNN achieves substantially lower out-of-distribution error with fewer arithmetic operations.
+\end{enumerate}
+
+Finally, all latency and peak memory measurements should be interpreted as empirical measurements of the complete software and hardware stack rather than intrinsic, hardware-independent properties of the mathematical architectures. They depend heavily on the specific GPU microarchitecture, CUDA and library versions, low-level kernel fusions, and runtime caching states. Theoretical FLOPs and trainable parameter footprints therefore remain the primary hardware-agnostic standards for algorithmic complexity.
+
+
+\section{Extended Ablations and Sensitivity Analysis}
+\label{app:ablations}
+
+\subsection{Network Depth Scaling Analysis}
+
+To analyze the capacity of PGA-GNN as a function of network depth, we train architectures with $L \in \{1, 2, 3, 4, 5, 6\}$ message-passing layers on the gravitational $N$-body system across three data regimes ($N_{\text{train}} \in \{100, 1000, 10000\}$). Figure~\ref{fig:ablation_layers} presents the Validation, Test, and OOD Mean Squared Errors averaged over three random seeds.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=\linewidth]{images/article_draft_imgs/ablation_scaling_layers.pdf}
+    \caption{Depth scaling analysis of PGA-GNN on the gravitational N-body system. Models with 1 to 6 layers evaluated across three data sample regimes ($N_{\text{train}} \in \{100, 1000, 10000\}$). Curves report mean and standard deviation across three random seeds.}
+    \label{fig:ablation_layers}
+\end{figure}
+
+The empirical scaling curves reveal two key findings:
+\begin{enumerate}
+    \item \textbf{Rapid Convergence with Shallow Depth:} PGA-GNN achieves near-optimal error with as few as 2 layers across all data regimes, indicating that localized geometric product message-passing captures the relational dynamics without requiring deep networks.
+    \item \textbf{Depth Invariance and Resistance to Oversmoothing:} Across all training regimes, PGA-GNN maintains virtually constant Validation, Test, and OOD performance from 1 up to 6 layers (with OOD MSE holding steady at $3.8 \times 10^{-3}$ for $N_{\text{train}} = 100$). Unlike conventional GNNs that degrade rapidly due to oversmoothing or vanishing gradients as depth increases, PGA-GNN's localized geometric product message-passing, stabilized by equivariant layer normalization and gated residual connections, neither deteriorates with deeper layers nor requires deep stacks to learn the underlying physical dynamics.
+\end{enumerate}
+
+\subsection{Exact Numerical Results for Architectural Component Ablations}
+
+To complement the bar plot in Figure~\ref{fig:abl}, Table~\ref{tab:ablation_components_numerical} provides the exact numerical Mean Squared Error (MSE) metrics across training set sizes ($N_{\text{train}} \in \{100, 1000, 10000\}$), reported as mean $\pm$ standard deviation across three independent random seeds (seeds 42, 43, 44).
+
+\begin{table*}[!ht]
+\centering
+\caption{Detailed numerical ablation study on the gravitational $N$-body system across training set sizes ($N_{\text{train}} \in \{100, 1000, 10000\}$). Metrics report MSE ($\times 10^{-3}$) on Validation, Test, and OOD splits as mean $\pm$ std over three random seeds.}
+\label{tab:ablation_components_numerical}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccccc}
+\toprule
+ & \multicolumn{3}{c}{\textbf{Sample Size: 100} (0.1\%)} & \multicolumn{3}{c}{\textbf{Sample Size: 1,000} (1\%)} & \multicolumn{3}{c}{\textbf{Sample Size: 10,000} (10\%)} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+\textbf{Ablation Configuration} & \textbf{Val MSE} & \textbf{Test MSE} & \textbf{OOD MSE} & \textbf{Val MSE} & \textbf{Test MSE} & \textbf{OOD MSE} & \textbf{Val MSE} & \textbf{Test MSE} & \textbf{OOD MSE} \\
+\midrule
+w/o Geo.\ Product \& Edge Attr. & $22.10 \pm 0.10$ & $24.00 \pm 0.17$ & $21.73 \pm 0.06$ & $21.87 \pm 0.42$ & $23.93 \pm 0.91$ & $21.53 \pm 0.38$ & $22.00 \pm 0.35$ & $23.83 \pm 0.06$ & $21.63 \pm 0.29$ \\
+w/o Geometric Product           & $20.20 \pm 0.10$ & $21.80 \pm 0.10$ & $19.93 \pm 0.06$ & $19.80 \pm 0.00$ & $21.40 \pm 0.00$ & $19.60 \pm 0.00$ & $19.73 \pm 0.06$ & $21.30 \pm 0.00$ & $19.53 \pm 0.06$ \\
+w/o Edge Attributes             & $5.13 \pm 2.22$  & $7.20 \pm 2.95$  & $5.10 \pm 2.17$  & $5.07 \pm 2.11$  & $7.53 \pm 3.18$  & $5.03 \pm 2.05$  & $5.00 \pm 2.08$  & $7.30 \pm 3.21$  & $4.97 \pm 2.02$ \\
+w/o Scalar Track                & $3.90 \pm 0.00$  & $5.57 \pm 0.29$  & $3.83 \pm 0.06$  & $3.83 \pm 0.06$  & $5.47 \pm 0.15$  & $3.83 \pm 0.06$  & $3.80 \pm 0.00$  & $5.43 \pm 0.23$  & $3.80 \pm 0.00$ \\
+\midrule
+\textbf{PGA-GNN (Full Baseline)}& $\mathbf{3.73 \pm 0.06}$ & $\mathbf{5.17 \pm 0.06}$ & $\mathbf{3.77 \pm 0.06}$ & $\mathbf{3.63 \pm 0.06}$ & $\mathbf{5.07 \pm 0.06}$ & $\mathbf{3.70 \pm 0.00}$ & $\mathbf{3.60 \pm 0.00}$ & $\mathbf{5.00 \pm 0.00}$ & $\mathbf{3.60 \pm 0.00}$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+The exact numerical breakdown confirms the relative hierarchy of inductive biases:
+\begin{enumerate}
+    \item \textbf{Decisive Impact of the Geometric Product:} Removing the channel-wise geometric product causes an immediate five-fold error surge across all data regimes (e.g., test MSE rising from $5.17 \times 10^{-3}$ to $21.80 \times 10^{-3}$ at $N_{\text{train}}=100$). This empirically verifies that propagating explicit relative spatial transformations via multivector multiplication provides the essential inductive bias of the architecture.
+    \item \textbf{Regularizing Role of Edge Attributes:} Removing edge attributes increases test error by $\approx 40\%$ and substantially elevates the standard deviation across random seeds, confirming that explicit geometric edge connections provide optimization stability.
+    \item \textbf{Complementary Value of the Scalar Track:} Removing the scalar track results in a consistent performance penalty of $\approx 8\text{--}10\%$, demonstrating that non-geometric metadata provides helpful conditioning throughout message passing.
+\end{enumerate}
+
+\end{document}

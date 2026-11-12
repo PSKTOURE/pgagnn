@@ -452,6 +452,41 @@ class ResidualLayer(nn.Module):
         return out_mv, out_sc
 
 
+class PolynomialCutoff(nn.Module):
+    """C2 cutoff: 1-21*x^5+35*x^6-15*x^7 inside the radius, zero outside."""
+
+    def __init__(self, cutoff: float):
+        super().__init__()
+        if cutoff <= 0:
+            raise ValueError("cutoff must be positive")
+        self.cutoff = cutoff
+
+    def forward(self, dist: torch.Tensor) -> torch.Tensor:
+        x = (dist / self.cutoff).clamp(0, 1)
+        # Factoring avoids cancellation close to x=1, including in float32.
+        return (1 - x).pow(3) * (1 + x * (3 + x * (6 + x * (10 + 15 * x))))
+
+
+class BesselRadialBasisLayer(nn.Module):
+    """Sine-over-radius basis with a finite origin limit and C2 envelope."""
+
+    def __init__(self, num_bases: int = 8, cutoff: float = 5.0):
+        super().__init__()
+        if num_bases < 1:
+            raise ValueError("num_bases must be positive")
+        self.cutoff = cutoff
+        self.envelope = PolynomialCutoff(cutoff)
+        self.register_buffer("frequencies", torch.arange(1, num_bases + 1) * (math.pi / cutoff))
+
+    def forward(self, dist: torch.Tensor) -> torch.Tensor:
+        x = dist * self.frequencies
+        small = x.abs() < 1e-3
+        safe_x = torch.where(small, torch.ones_like(x), x)
+        sinc = torch.where(small, 1 - x.square()/6 + x.pow(4)/120 - x.pow(6)/5040,
+                           safe_x.sin()/safe_x)
+        return math.sqrt(2/self.cutoff) * self.frequencies * sinc * self.envelope(dist)
+
+
 class GaussianRadialBasisLayer(nn.Module):
     """Gaussian smearing with cosine cutoff envelope."""
 

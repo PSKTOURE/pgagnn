@@ -338,7 +338,7 @@ def embed_inputs_packed(inputs: torch.Tensor) -> torch.Tensor:
     v = inputs[..., 4:7]  # (N, 3)
 
     m_embedded = embed_scalar(m)  # (N, 16)
-    x_embedded = embed_point(x.unsqueeze(0)).squeeze()  # (N, 16)
+    x_embedded = embed_point(x)  # (N, 16)
     v_embedded = embed_translation(v)  # (N, 16)
 
     embedded_inputs = m_embedded + x_embedded + v_embedded
@@ -526,7 +526,7 @@ def _forward_ga_dense(
     pos = inputs[..., 1:4]  # (B, N, 3)
     edge_attr_mv, edge_attr_sc = None, None
     if use_edge_attr:
-        pos_embedded = embed_point(pos).squeeze()  # (B, N, 16)
+        pos_embedded = embed_point(pos)  # (B, N, 16)
         src = pos.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, 3)
         dst = pos.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, 3)
         u = dst - src
@@ -578,8 +578,8 @@ def _forward_ga_sparse(
         x_i = inputs[src][:, 1:4]  # (num_edges, 3)
         x_j = inputs[dst][:, 1:4]  # (num_edges, 3)
         u = x_j - x_i  # (num_edges, 3)
-        src_embedded = embed_point(x_i).squeeze()  # (num_edges, 16)
-        dst_embedded = embed_point(x_j).squeeze()  # (num_edges, 16)
+        src_embedded = embed_point(x_i)  # (num_edges, 16)
+        dst_embedded = embed_point(x_j)  # (num_edges, 16)
         ref_edge = ref[batch_vec[src]].squeeze(1)  # (E, 16)
         edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref_edge).unsqueeze(
             -2

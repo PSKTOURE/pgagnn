@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import RadiusGraph
-from torch_geometric.utils import scatter, to_dense_adj, to_dense_batch
+from torch_geometric.utils import add_remaining_self_loops, scatter, to_dense_adj, to_dense_batch
 from torch_scatter import scatter_mean
 from tqdm import tqdm
 
@@ -46,9 +46,9 @@ from segnn.segnn import SEGNN
 from egnn.models.egnn_clean.egnn_clean import EGNN
 from src.checkpointing import StopSignalHandler, load_checkpoint, parse_signals, save_checkpoint
 from src.ggnn import GGNN
-from src.layers import GaussianRadialBasisLayer
+from src.layers import BesselRadialBasisLayer, GaussianRadialBasisLayer, PolynomialCutoff
 from src.pgagnn import PGA_GNN
-from src.primitives import embed_point, outer_product
+from src.primitives import embed_point, equivariant_join
 from src.utils import seed_everything
 
 # Extend pytorch printing options for debugging (disable line breaks)
@@ -103,7 +103,7 @@ def _safe_l2_norm(
     eps: float = 1e-12,
 ) -> torch.Tensor:
     """Numerically stable L2 norm for higher-order gradient paths."""
-    return torch.sum(x * x, dim=dim, keepdim=keepdim)
+    return torch.sqrt(torch.sum(x * x, dim=dim, keepdim=keepdim) + eps * eps)
 
 
 @dataclass
@@ -146,13 +146,22 @@ class GAModel(nn.Module):
         edge_rbf_dim: int = 64,
         edge_sc_hidden: int = 128,
         cutoff: float = 5.0,
+        smooth_cutoff: bool = False,
+        radial_basis: str = "gaussian",
     ):
         super().__init__()
         self.base_model = base_model
         self.head = head
         self.edge_encoder = EdgeEncoder(in_dim=edge_rbf_dim, out_dim=edge_sc_hidden)
-        self.distance_embedder = GaussianRadialBasisLayer(num_bases=edge_rbf_dim, cutoff=cutoff)
+        radial_layers = {"gaussian": GaussianRadialBasisLayer, "bessel": BesselRadialBasisLayer}
+        if radial_basis not in radial_layers:
+            raise ValueError("radial_basis must be gaussian or bessel")
+        self.distance_embedder = radial_layers[radial_basis](num_bases=edge_rbf_dim, cutoff=cutoff)
         self.z_embed = nn.Embedding(num_elements, sc_dim)
+        if smooth_cutoff and not isinstance(base_model, PGA_GNN):
+            raise ValueError("smooth_cutoff is implemented for PGA_GNN")
+        self.smooth_cutoff = smooth_cutoff
+        self.cutoff_envelope = PolynomialCutoff(cutoff)
         # self.vect_encoder = nn.Linear(3, edge_sc_hidden)
 
     def forward(self, graph_batch: GraphBatch):
@@ -180,14 +189,26 @@ class GAModel(nn.Module):
             node_features = self.base_model(segnn_graph)
             return self.head(node_features, batch_vec=graph_batch.batch)
 
-        # embed distances with internal distance embedder then encode
-        rbf = self.distance_embedder(graph_batch.edge_attr_sc)
+        edge_index = graph_batch.edge_index
+        edge_attr_mv = graph_batch.edge_attr_mv
+        distances = graph_batch.edge_attr_sc
+        if self.smooth_cutoff and graph_batch.packed:
+            # A unit-weight self-edge anchors each attention denominator, even
+            # when the last physical neighbor reaches the cutoff.
+            edge_index, distances = add_remaining_self_loops(
+                graph_batch.edge_index, distances, fill_value=0., num_nodes=graph_batch.mv.size(0))
+            _, edge_attr_mv = add_remaining_self_loops(
+                graph_batch.edge_index, edge_attr_mv, fill_value=0., num_nodes=graph_batch.mv.size(0))
+        edge_weight = self.cutoff_envelope(distances).squeeze(-1) if self.smooth_cutoff else None
+        # Encode normally; gate the actual attention/value paths after all edge
+        # projections and normalization, rather than only tapering their inputs.
+        rbf = self.distance_embedder(distances)
         edge_attr_sc_encoded = self.edge_encoder(rbf)
         if isinstance(self.base_model, GATr):
             out_mv, out_sc = self.base_model(
                 graph_batch.mv,
                 scalars=sc_embedded,
-                attention_mask=(graph_batch.adj > 0).float().unsqueeze(1),
+                attention_mask=(graph_batch.adj > 0).unsqueeze(1),
             )
         elif isinstance(self.base_model, GGNN):
             rbf = self.distance_embedder(graph_batch.edge_attr_sc)
@@ -208,11 +229,12 @@ class GAModel(nn.Module):
                 ref=graph_batch.ref,
                 adj=graph_batch.adj,
                 sc=sc_embedded,
-                edge_index=graph_batch.edge_index,
-                edge_attr_mv=graph_batch.edge_attr_mv,
+                edge_index=edge_index,
+                edge_attr_mv=edge_attr_mv,
                 edge_attr_sc=edge_attr_sc_encoded,
                 batch=graph_batch.batch,
                 mask=graph_batch.mask,
+                edge_weight=edge_weight,
             )
         return self.head(out_mv, out_sc, graph_batch.mask, graph_batch.batch)
 
@@ -599,6 +621,7 @@ def embed_inputs(
         pos_centered = pos - mean_pos[batch_vec]
 
         mv = embed_point(pos_centered).unsqueeze(1)  # (N, 1, 16)
+        ref = scatter_mean(mv, batch_vec, dim=0, dim_size=num_graphs)
 
         z_int = batch.z.long().to(device)
         sc = z_int
@@ -608,12 +631,10 @@ def embed_inputs(
         u = pos_centered[dst] - pos_centered[src]  # (E, 3)
         src_embedded = embed_point(pos_centered[src])  # (E, 16)
         dst_embedded = embed_point(pos_centered[dst]) # (E, 16)
-        edge_attr_mv = outer_product(src_embedded, dst_embedded).unsqueeze(-2)  # (E, 1, 16)
+        ref_edge = ref[batch_vec[src]].squeeze(1)  # (E, 16)
+        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref_edge).unsqueeze(-2)
         d = _safe_l2_norm(u, dim=-1, keepdim=True)
         edge_attr_sc = d
-
-        # Reference (Mean of MV) per graph (Num_grahs, 1, 16)
-        ref = scatter_mean(mv, batch_vec, dim=0, dim_size=num_graphs).to(device)
 
         mv = mv.to(device)
         sc = sc.to(device)
@@ -636,15 +657,17 @@ def embed_inputs(
         )
 
     pos, mask = to_dense_batch(batch.pos, batch=batch.batch)
-    mean_pos = torch.mean(pos, dim=1, keepdim=True)
-    pos_centered = pos - mean_pos  # (B, N, 3)
+    weights = mask.unsqueeze(-1).to(pos.dtype)
+    mean_pos = (pos * weights).sum(dim=1, keepdim=True) / weights.sum(dim=1, keepdim=True).clamp_min(1)
+    pos_centered = (pos - mean_pos) * weights  # (B, N, 3)
     mv = embed_point(pos_centered).unsqueeze(-2)  # (B, N, 1, 16)
+    ref = (mv * mask[..., None, None]).sum(dim=(1, 2), keepdim=True) / mask.sum(dim=1).clamp_min(1)[:, None, None, None]
     pos_i = pos_centered.unsqueeze(2)  # (B, N, 1, 3)
     pos_j = pos_centered.unsqueeze(1)  # (B, 1, N, 3)
     u = pos_j - pos_i
-    pos_i_embedded = embed_point(pos_i).unsqueeze(2)  # (B, N, 1, 16)
-    pos_j_embedded = embed_point(pos_j).unsqueeze(1)  # (B, 1, N, 16)
-    edge_attr_mv = outer_product(pos_i_embedded, pos_j_embedded).unsqueeze(-2)  # (B, N, N, 1, 16)
+    pos_i_embedded = embed_point(pos_centered).unsqueeze(2)  # (B, N, 1, 16)
+    pos_j_embedded = embed_point(pos_centered).unsqueeze(1)  # (B, 1, N, 16)
+    edge_attr_mv = equivariant_join(pos_i_embedded, pos_j_embedded, ref).unsqueeze(-2)
     distances = _safe_l2_norm(u, dim=-1, keepdim=True)
     edge_attr_sc = distances
 
@@ -662,10 +685,8 @@ def embed_inputs(
     adj = to_dense_adj(batch.edge_index, batch=batch.batch, max_num_nodes=pos.size(1)).to(device)
     eye = torch.eye(adj.size(1), device=device).unsqueeze(0)
     mask_2d = mask.unsqueeze(-1) * mask.unsqueeze(-2)
-    adj = torch.maximum(adj, eye) * (mask_2d + eye)
+    adj = torch.maximum(adj, eye) * mask_2d
     adj = adj.to(device)
-
-    ref = torch.mean(mv, dim=(1, 2), keepdim=True).to(device)  # (B, 1, 16)
 
     return GraphBatch(
         mv=mv,
@@ -1060,6 +1081,7 @@ def train_model(
     signals_to_handle: list | None = None,
     tbw: SummaryWriter | None = None,
     no_tqdm: bool = False,
+    evaluate_test: bool = True,
 ):
     params = list(model.parameters())
 
@@ -1141,6 +1163,8 @@ def train_model(
         best_swa_state = ckpt.get("best_swa_state")
         epochs_without_improve = ckpt.get("epochs_without_improve", epochs_without_improve)
         swa_activated = ckpt.get("swa_activated", swa_activated)
+        if train_loader.generator is not None and ckpt.get("train_generator_state") is not None:
+            train_loader.generator.set_state(ckpt["train_generator_state"].cpu())
         print(f"Resumed at epoch {start_epoch}, best_force_mae={best_force_mae:.6f}")
 
     if stop_handler is None:
@@ -1177,6 +1201,8 @@ def train_model(
             "rng_state": torch.get_rng_state().cpu(),
             "cuda_rng_state": (torch.cuda.get_rng_state().cpu() if torch.cuda.is_available() else None),
             "np_rng_state": np.random.get_state(),
+            "train_generator_state": (train_loader.generator.get_state()
+                                      if train_loader.generator is not None else None),
         }
 
     if signals_to_handle and last_checkpoint_path:
@@ -1326,6 +1352,9 @@ def train_model(
             )
 
         if stop_handler is not None and stop_handler.stop_requested:
+            if last_checkpoint_path:
+                save_checkpoint(path=last_checkpoint_path, payload=build_checkpoint_payload(
+                    epoch=last_completed_epoch, interrupted=True, signal_name=stop_handler.last_signal))
             print(f"Stop requested ({stop_handler.last_signal}). Saved checkpoint and stopping training.")
             break
 
@@ -1360,8 +1389,17 @@ def train_model(
 
     model.load_state_dict(selected_state["model"])
     print(
-        f"Selected {selected_model_name.upper()} checkpoint from epoch {selected_state['epoch']} for final test."
+        f"Selected {selected_model_name.upper()} checkpoint from epoch {selected_state['epoch']} using validation."
     )
+
+    if not evaluate_test:
+        if checkpoint_path:
+            torch.save(selected_state, Path(checkpoint_path).with_name("selected_model.pth"))
+        losses.update(test_force_mae_mev_A=None, test_energy_mae_mev=None, test_loss=None,
+                      best_val_loss=best_val, selected_model=selected_model_name,
+                      selected_epoch=selected_state['epoch'])
+        print("Test evaluation deferred; selected checkpoint saved.")
+        return losses
 
     test_metrics = evaluate(
         model_name,
@@ -1391,6 +1429,7 @@ def train_model(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train GA models on MD17")
+    parser.add_argument("--config", type=str, default=None, help="JSON defaults; explicit CLI options override them.")
     parser.add_argument(
         "--model_name",
         choices=["pgagnn", "gatr", "egnn", "segnn", "ggnn"],
@@ -1415,6 +1454,10 @@ def parse_args():
     )
     parser.add_argument("--data_dir", type=str, default=str(ROOT_DIR / "datasets" / "md17"))
     parser.add_argument("--cutoff", type=float, default=5.0)
+    parser.add_argument("--smooth_cutoff", action="store_true",
+                        help="Use C2 cutoff-weighted attention with unit-weight self-edges (PGA-GNN).")
+    parser.add_argument("--radial_basis", choices=["gaussian", "bessel"], default="gaussian")
+    parser.add_argument("--skip_test", action="store_true", help="Select on validation and defer test evaluation.")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=3500)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -1470,11 +1513,23 @@ def parse_args():
     parser.add_argument(
         "--no_time_suffix", action="store_true", help="Disable time suffix for run directory."
     )
+    preliminary, _ = parser.parse_known_args()
+    if preliminary.config:
+        with open(preliminary.config) as config_file:
+            config = json.load(config_file)
+        unknown = set(config) - {action.dest for action in parser._actions}
+        if unknown:
+            parser.error(f"Unknown configuration keys: {sorted(unknown)}")
+        parser.set_defaults(**config)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cudnn.allow_tf32 = False
+    args.float32_matmul_precision = torch.get_float32_matmul_precision()
+    args.cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
     if args.ema_decay < 0.0 or args.ema_decay >= 1.0:
         raise ValueError("--ema_decay must be in [0, 1).")
     if args.swa_start_epoch < 0:
@@ -1563,6 +1618,8 @@ def main():
         edge_rbf_dim=args.num_rbf,
         edge_sc_hidden=edge_hidden_dim,
         cutoff=args.cutoff,
+        smooth_cutoff=args.smooth_cutoff,
+        radial_basis=args.radial_basis,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1612,6 +1669,7 @@ def main():
         signals_to_handle=signals_to_handle,
         tbw=tbw,
         no_tqdm=args.no_tqdm,
+        evaluate_test=not args.skip_test,
     )
 
     json_path = save_metrics_to_json(results, run_dir, args)
@@ -1631,9 +1689,12 @@ def main():
     print(f"Best validation loss: {results['best_val_loss']:.6f}")
     print(f"Final train loss: {results['train'][-1]:.6f}")
     print(f"Final val loss: {results['val'][-1]:.6f}")
-    print(f"Test loss: {results['test_loss']:.6f}")
-    print(f"Test Force MAE: {results['test_force_mae_mev_A']:.4f} meV/Å")
-    print(f"Test Energy MAE: {results['test_energy_mae_mev']:.4f} meV")
+    if args.skip_test:
+        print("Test evaluation deferred.")
+    else:
+        print(f"Test loss: {results['test_loss']:.6f}")
+        print(f"Test Force MAE: {results['test_force_mae_mev_A']:.4f} meV/Å")
+        print(f"Test Energy MAE: {results['test_energy_mae_mev']:.4f} meV")
     print(f"Total epochs: {len(results['train'])}")
     print(f"Run directory: {run_dir}")
     print(f"Model saved to: {checkpoint_path}")

@@ -452,7 +452,8 @@ def _compute_edge_attributes_sparse(
     edge_vect = dst - src  # (E, 3)
     src_embedded = embed_point(src)  # (E, 16)
     dst_embedded = embed_point(dst)  # (E, 16)
-    edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)  # (E, 1, 16)
+    ref_edge = ref[batch_vec[edge_index[0]]].squeeze(1)  # (E, 16)
+    edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref_edge).unsqueeze(-2)  # (E, 1, 16)
     edge_attr_sc = torch.linalg.norm(edge_vect, dim=-1, keepdim=True)  # (E, 1)
     return pos_centered, edge_vect, edge_attr_mv, edge_attr_sc
 
@@ -470,10 +471,9 @@ def _compute_edge_attributes_dense(
     src = pos.unsqueeze(2)  # (B, N, 1, 3)
     dst = pos.unsqueeze(1)  # (B, 1, N, 3)
     edge_vect = src - dst  # (B, N, N, 3)
-    ref_edge = ref[batch_vec[src]].squeeze(1)  # (E, 16)
     src_embedded = embed_point(pos).unsqueeze(2)  # (B, N, 1, 16)
     dst_embedded = embed_point(pos).unsqueeze(1)  # (B, 1, N, 16)
-    edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref_edge).unsqueeze(-2)  # (B, N, N, 1, 16)
+    edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)  # (B, N, N, 1, 16)
     edge_attr_sc = torch.linalg.norm(edge_vect, dim=-1, keepdim=True)
 
     adj = to_dense_adj(edge_index, batch=batch_vec, max_num_nodes=N).to(device)
@@ -481,8 +481,7 @@ def _compute_edge_attributes_dense(
     adj = torch.maximum(adj, eye)
 
     mask_2d = mask.unsqueeze(-1) * mask.unsqueeze(-2)
-    off_diagonal_mask = mask_2d + eye
-    adj = adj * off_diagonal_mask
+    adj = adj * mask_2d
     edge_vect = edge_vect * mask_2d.unsqueeze(-1)
 
     return edge_vect, edge_attr_mv, edge_attr_sc, adj
@@ -549,7 +548,7 @@ def embed_inputs(batch, embedding: str, device: torch.device, use_sparse: bool =
     mask = mask.to(device)
 
     mv = embed_point(pos, type=embedding).unsqueeze(-2)  # (B, N, 1, 16)
-    ref = torch.mean(mv, dim=(1, 2), keepdim=True)
+    ref = (mv * mask[..., None, None]).sum(dim=(1, 2), keepdim=True) / mask.sum(dim=1).clamp_min(1)[:, None, None, None]
 
     edge_vect, edge_attr_mv, edge_attr_sc, adj = _compute_edge_attributes_dense(
         pos, batch.edge_index, batch_vec, ref, mask, device
@@ -645,7 +644,7 @@ class ModelWrapper(nn.Module):
         if self.model_name == "gatr":
             if batch.adj is None:
                 raise ValueError("GATr requires a dense attention mask (adjacency).")
-            attention_mask = (batch.adj > 0).float().unsqueeze(1)
+            attention_mask = (batch.adj > 0).unsqueeze(1)
             return self.base_model(mv, scalars=sc, attention_mask=attention_mask)
         raise ValueError(f"Unknown model name: {self.model_name}")
 
@@ -724,7 +723,7 @@ class GraphRegressor(nn.Module):
         pos: torch.Tensor = None,
     ) -> torch.Tensor:
         """Predict graph-level properties with target-specific readout modes."""
-        inv = invariants(mv).flatten(start_dim=-2)
+        inv = invariants(mv, centered=True).flatten(start_dim=-2)
 
         if sc is not None:
             node_feats = torch.cat([inv, sc], dim=-1)
@@ -765,7 +764,7 @@ class GraphRegressor(nn.Module):
 
         dipole_contrib = charges.unsqueeze(-1) * pos
         graph_dipole = self._pool_nodes(dipole_contrib, mask, batch_vec)
-        return torch.linalg.norm(graph_dipole + 1e-8, dim=-1)
+        return torch.linalg.norm(graph_dipole, dim=-1)
 
     def _pool_nodes(
         self,
@@ -1176,7 +1175,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--epochs", type=int, default=1200)
     parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--weight_decay", type=float, default=5e-7)
     parser.add_argument("--in_mvc", type=int, default=1)
     parser.add_argument("--in_sc", type=int, default=10)
     parser.add_argument("--hidden_mvc", type=int, default=32)
@@ -1224,6 +1223,10 @@ def parse_args():
 
 def main():
     args = parse_args()
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cudnn.allow_tf32 = False
+    args.float32_matmul_precision = torch.get_float32_matmul_precision()
+    args.cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
     if args.ema_decay < 0.0 or args.ema_decay >= 1.0:
         raise ValueError("--ema_decay must be in [0, 1).")
 

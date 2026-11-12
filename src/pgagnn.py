@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch_scatter import scatter_add, scatter_softmax
+from torch_scatter import scatter_add, scatter_max, scatter_softmax
 
 from .attention import get_attention_module
 from .layers import (
@@ -15,6 +15,30 @@ from .layers import (
 )
 from .primitives import geometric_product, reverse
 from .utils import INNER_PRODUCT_INDICES
+
+
+def _cutoff_softmax(scores, weight, *, dst=None, num_nodes=None):
+    """Normalize weight*exp(score), shifting by the weighted maximum.
+
+    Callers bound scores and retain unit-weight self-edges. The detached shift
+    keeps denominators near one without differentiating log(weight) at zero,
+    which would be unstable for force-loss second derivatives.
+    """
+    with torch.no_grad():
+        shifted_scores = scores + weight.clamp_min(torch.finfo(scores.dtype).tiny).log()
+        shifted_scores = shifted_scores.masked_fill(weight <= 0, float('-inf'))
+        if dst is None:
+            shift = shifted_scores.amax(dim=-1, keepdim=True)
+        else:
+            shift = scatter_max(shifted_scores, dst, dim=0, dim_size=num_nodes)[0][dst]
+        shift = torch.where(torch.isfinite(shift), shift, torch.zeros_like(shift))
+    weighted = (scores - shift).exp() * weight
+    if dst is None:
+        denominator = weighted.sum(dim=-1, keepdim=True)
+    else:
+        denominator = scatter_add(weighted, dst, dim=0, dim_size=num_nodes)[dst]
+    denominator = torch.where(denominator > 0, denominator, torch.ones_like(denominator))
+    return weighted / denominator
 
 
 class EquiMLP(nn.Module):
@@ -377,6 +401,7 @@ class GA_MessageLayer(nn.Module):
         edge_index: torch.Tensor | None = None,
         edge_attr_mv: torch.Tensor | None = None,
         edge_attr_sc: torch.Tensor | None = None,
+        edge_weight: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Parameters
@@ -403,7 +428,7 @@ class GA_MessageLayer(nn.Module):
         """
         # Sparse path: edge_index-driven attention (GATr variants only)
         if edge_index is not None and self.attention_type == "gatr_sparse":
-            return self._forward_sparse(mv, sc, ref, edge_index, edge_attr_mv, edge_attr_sc)
+            return self._forward_sparse(mv, sc, ref, edge_index, edge_attr_mv, edge_attr_sc, edge_weight)
         if edge_index is None and self.attention_type == "gatr_sparse":
             raise ValueError("gatr_sparse requires edge_index for sparse attention.")
 
@@ -454,9 +479,13 @@ class GA_MessageLayer(nn.Module):
         mask_to_inf = (~mask) & valid
         attn_mask = attn_mask.masked_fill(mask_to_inf.unsqueeze(1), float("-inf"))
 
-        if E_mv is not None or E_sc is not None:
+        if E_mv is not None or E_sc is not None or edge_weight is not None:
             attn_weights = torch.matmul(Q_all, K_all.transpose(-2, -1)) + attn_mask
-            attn_weights = F.softmax(attn_weights.float(), dim=-1)
+            if edge_weight is not None:
+                attn_weights = attn_weights.clamp(-30, 30).masked_fill(mask_to_inf.unsqueeze(1), float("-inf"))
+                attn_weights = _cutoff_softmax(attn_weights, edge_weight.unsqueeze(1))
+            else:
+                attn_weights = F.softmax(attn_weights.float(), dim=-1)
             attn_weights = torch.where(
                 valid.unsqueeze(1),
                 attn_weights,
@@ -541,6 +570,7 @@ class GA_MessageLayer(nn.Module):
         edge_index: torch.Tensor,
         edge_attr_mv: torch.Tensor | None = None,
         edge_attr_sc: torch.Tensor | None = None,
+        edge_weight: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Sparse edge-wise attention path for GATr attention only."""
         if mv.dim() != 3:
@@ -592,7 +622,10 @@ class GA_MessageLayer(nn.Module):
         scores = scores.clamp(-30, 30)
 
         # Edge softmax per destination node
-        attn = scatter_softmax(scores, dst, dim=0, dim_size=num_nodes)  # (E, H)
+        if edge_weight is not None:
+            attn = _cutoff_softmax(scores, edge_weight.unsqueeze(-1), dst=dst, num_nodes=num_nodes)
+        else:
+            attn = scatter_softmax(scores, dst, dim=0, dim_size=num_nodes)  # (E, H)
 
         # Expand attention weights for multivector broadcasts: (E, H, 1, 1)
         attn_mv = attn.unsqueeze(-1).unsqueeze(-1)
@@ -763,6 +796,7 @@ class PGA_GNN(nn.Module):
         batch: torch.Tensor | None = None,
         mask: torch.Tensor | None = None,
         ref: torch.Tensor | None = None,
+        edge_weight: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Parameters
@@ -820,6 +854,7 @@ class PGA_GNN(nn.Module):
                     edge_index=edge_index,
                     edge_attr_mv=edge_attr_mv,
                     edge_attr_sc=edge_attr_sc,
+                    edge_weight=edge_weight,
                 )
             mv, sc = self.output_proj(mv, sc)
             return mv, sc
@@ -838,6 +873,7 @@ class PGA_GNN(nn.Module):
                 edge_attr_mv=edge_attr_mv,
                 edge_attr_sc=edge_attr_sc,
                 ref=ref,
+                edge_weight=edge_weight,
             )
         mv, sc = self.output_proj(mv, sc)
         return mv, sc

@@ -18,8 +18,8 @@ Checks:
   2. Reflection equivariance (improper orthogonal Q, det = -1)
      -> Evaluated both without edge attributes (core GA message-passing layers)
         and with algebraic bivector edge attributes constructed via the PGA
-        outer product: edge_attr_mv = outer_product(pos_i, pos_j). Exact
-        reflection equivariance is preserved across both modes.
+        join. Hidden-state covariance and canonical Cartesian re-embedding are
+        separate properties; deeper, nondegenerate checks live in test_symmetry.py.
   3. Translation equivariance: PGA_GNN predicts *absolute* future positions
      (not a relative displacement added back on afterwards, unlike GGNN), so
      shifting every input position by a constant t should shift every
@@ -127,6 +127,7 @@ def predict_points(model, mass, pos, vel, adj, use_edge_attr, dist_embedder=None
         src_embedded = pos_embedded.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, 16)
         dst_embedded = pos_embedded.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, 16)
         edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)  # (B, N, N, 1, 16)
+        assert edge_attr_mv.abs().max() > 0
         rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
         rel_norm = dist_embedder(rel_norm)  # (B, N, N, edge_sc)
         edge_attr_sc = rel_norm

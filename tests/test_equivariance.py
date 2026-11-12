@@ -7,7 +7,7 @@ from src.primitives import (
     embed_scalar,
     embed_translation,
     extract_point,
-    outer_product,
+    equivariant_join,
 )
 
 EDGE_SC_DIST_CHANNELS = 4
@@ -75,7 +75,8 @@ def predict_points(model, mass, pos, vel, adj, use_edge_attr, dist_embedder=None
         u = dst - src
         src_embedded = pos_embedded.unsqueeze(2).expand(-1, -1, N, -1)
         dst_embedded = pos_embedded.unsqueeze(1).expand(-1, N, -1, -1)
-        edge_attr_mv = outer_product(src_embedded, dst_embedded).unsqueeze(-2)
+        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)
+        assert edge_attr_mv.abs().max() > 0
         rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
         rel_norm = dist_embedder(rel_norm)
         edge_attr_sc = rel_norm
