@@ -2,13 +2,7 @@ import torch
 
 from src.layers import GaussianRadialBasisLayer
 from src.pgagnn import PGA_GNN
-from src.primitives import (
-    embed_point,
-    embed_scalar,
-    embed_translation,
-    extract_point,
-    equivariant_join,
-)
+
 
 EDGE_SC_DIST_CHANNELS = 4
 
@@ -58,31 +52,15 @@ def apply_rotation(x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
 
 
 def predict_points(model, mass, pos, vel, adj, use_edge_attr, dist_embedder=None):
-    m_embedded = embed_scalar(mass)
-    x_embedded = embed_point(pos).squeeze()
-    v_embedded = embed_translation(vel)
-    inputs_emb = (m_embedded + x_embedded + v_embedded).unsqueeze(2)
+    """Exercise the production Cartesian pipeline rather than a copied embedding."""
+    from experiments.nbody.train_nbody import _forward_ga_dense
 
-    B, N = mass.shape[:2]
-    sc = torch.zeros(B, N, 1, dtype=mass.dtype)
-    ref = inputs_emb.mean(dim=(1, 2), keepdim=True)
-
-    edge_attr_mv, edge_attr_sc = None, None
-    if use_edge_attr:
-        pos_embedded = embed_point(pos).squeeze()
-        src = pos.unsqueeze(2).expand(-1, -1, N, -1)
-        dst = pos.unsqueeze(1).expand(-1, N, -1, -1)
-        u = dst - src
-        src_embedded = pos_embedded.unsqueeze(2).expand(-1, -1, N, -1)
-        dst_embedded = pos_embedded.unsqueeze(1).expand(-1, N, -1, -1)
-        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)
-        assert edge_attr_mv.abs().max() > 0
-        rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
-        rel_norm = dist_embedder(rel_norm)
-        edge_attr_sc = rel_norm
-
-    mv, _ = model(inputs_emb, ref=ref, sc=sc, adj=adj, edge_attr_mv=edge_attr_mv, edge_attr_sc=edge_attr_sc)
-    return extract_point(mv[:, :, 0, :])
+    inputs = torch.cat([mass, pos, vel], dim=-1)
+    predictions, _, _, _ = _forward_ga_dense(
+        model, None, inputs, torch.zeros_like(pos), None, adj, pos.device,
+        use_edge_attr=use_edge_attr, dist_embedder=dist_embedder,
+    )
+    return predictions
 
 
 def _make_dist_embedder(use_edge_attr):

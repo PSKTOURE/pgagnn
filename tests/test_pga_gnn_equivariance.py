@@ -1,35 +1,9 @@
-"""
-Numerical E(3) equivariance tests for PGA_GNN.
+"""Cartesian E(3) checks through the production N-body PGA-GNN pipeline.
 
-Unlike GGNN, which operates directly on 3D vectors/scalars (so rotations act
-on those tensors in the obvious way), PGA_GNN operates on 16-dim projective
-geometric algebra (PGA) multivectors. We don't attempt to test equivariance
-of those internal multivectors directly -- that would mean reimplementing how
-PGA represents rotations/reflections just to check it. Instead we test the
-whole pipeline actually used at training time -- embed raw (mass, position,
-velocity) -> PGA_GNN -> extract predicted point -- as one black box, in plain
-R^3 space, and check that rotating/translating the raw inputs commutes with
-running that pipeline. `predict_points` below is a direct copy of the dense
-GA forward pass in `_forward_ga_dense` from the training code, scoped down to
-PGA_GNN, so this tests exactly what training runs.
-
-Checks:
-  1. Rotation equivariance   (proper orthogonal Q, det = +1)
-  2. Reflection equivariance (improper orthogonal Q, det = -1)
-     -> Evaluated both without edge attributes (core GA message-passing layers)
-        and with algebraic bivector edge attributes constructed via the PGA
-        join. Hidden-state covariance and canonical Cartesian re-embedding are
-        separate properties; deeper, nondegenerate checks live in test_symmetry.py.
-  3. Translation equivariance: PGA_GNN predicts *absolute* future positions
-     (not a relative displacement added back on afterwards, unlike GGNN), so
-     shifting every input position by a constant t should shift every
-     predicted output point by that same t.
-  4. A negative control, as in the GGNN tests: compare rotated-input output
-     against un-rotated-output without correcting for the rotation, and
-     confirm that mismatches (i.e. the harness itself is discriminating).
-
-All tests run in float64 and in eval() mode (dropout off) to keep numerical
-noise well below the equivariance-violation scale you'd get from a real bug.
+Positions and velocities are transformed before embedding. The tests exercise
+centering, geometric edge construction, message passing, coordinate decoding,
+and centroid restoration, with and without edges. Tests use float64 and eval
+mode; deeper amplified-weight checks also live in test_symmetry.py.
 """
 
 import torch
@@ -38,13 +12,7 @@ from src.layers import (
     GaussianRadialBasisLayer,
 )
 from src.pgagnn import PGA_GNN
-from src.primitives import (
-    embed_point,
-    embed_scalar,
-    embed_translation,
-    equivariant_join,
-    extract_point,
-)
+
 
 torch.manual_seed(0)
 
@@ -105,35 +73,15 @@ def apply_rotation(x: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
 
 
 def predict_points(model, mass, pos, vel, adj, use_edge_attr, dist_embedder=None):
-    """Runs the same dense GA forward pass as `_forward_ga_dense` in the
-    training code, scoped to PGA_GNN, and returns predicted points in raw
-    R^3 space -- this is the function whose E(3) equivariance we're testing.
-    """
-    m_embedded = embed_scalar(mass)
-    x_embedded = embed_point(pos).squeeze()
-    v_embedded = embed_translation(vel)
-    inputs_emb = (m_embedded + x_embedded + v_embedded).unsqueeze(2)  # (B, N, 1, 16)
+    """Exercise the production Cartesian pipeline rather than a copied embedding."""
+    from experiments.nbody.train_nbody import _forward_ga_dense
 
-    B, N = mass.shape[:2]
-    sc = torch.zeros(B, N, 1, dtype=mass.dtype)
-    ref = inputs_emb.mean(dim=(1, 2), keepdim=True)
-
-    edge_attr_mv, edge_attr_sc = None, None
-    if use_edge_attr:
-        pos_embedded = embed_point(pos).squeeze()  # (B, N, 16)
-        src = pos.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, 3)
-        dst = pos.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, 3)
-        u = dst - src
-        src_embedded = pos_embedded.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, 16)
-        dst_embedded = pos_embedded.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, 16)
-        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)  # (B, N, N, 1, 16)
-        assert edge_attr_mv.abs().max() > 0
-        rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
-        rel_norm = dist_embedder(rel_norm)  # (B, N, N, edge_sc)
-        edge_attr_sc = rel_norm
-
-    mv, _ = model(inputs_emb, ref=ref, sc=sc, adj=adj, edge_attr_mv=edge_attr_mv, edge_attr_sc=edge_attr_sc)
-    return extract_point(mv[:, :, 0, :])
+    inputs = torch.cat([mass, pos, vel], dim=-1)
+    predictions, _, _, _ = _forward_ga_dense(
+        model, None, inputs, torch.zeros_like(pos), None, adj, pos.device,
+        use_edge_attr=use_edge_attr, dist_embedder=dist_embedder,
+    )
+    return predictions
 
 
 def _make_dist_embedder(use_edge_attr):

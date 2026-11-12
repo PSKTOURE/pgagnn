@@ -45,7 +45,7 @@ from tqdm import tqdm
 from src.checkpointing import StopSignalHandler, load_checkpoint, parse_signals, save_checkpoint
 from src.layers import GaussianRadialBasisLayer
 from src.pgagnn import PGA_GNN
-from src.primitives import embed_point, equivariant_join, invariants
+from src.primitives import embed_point, equivariant_join, euclidean_dual, invariants
 from src.utils import seed_everything
 
 torch.set_printoptions(profile="short", linewidth=1000, sci_mode=True)
@@ -631,12 +631,12 @@ class ModelWrapper(nn.Module):
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         if self.model_name == "pgagnn":
             return self.base_model(
-                mv=mv,
-                ref=batch.ref,
+                mv=euclidean_dual(mv),
+                ref=euclidean_dual(batch.ref) if batch.ref is not None else None,
                 adj=batch.adj,
                 sc=sc,
                 edge_index=batch.edge_index,
-                edge_attr_mv=batch.edge_attr_mv,
+                edge_attr_mv=euclidean_dual(batch.edge_attr_mv) if batch.edge_attr_mv is not None else None,
                 edge_attr_sc=edge_attr_sc,
                 batch=batch.batch,
                 mask=batch.mask,
@@ -1223,6 +1223,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    args.geometry_encoding = "centered_euclidean_dual" if args.model_name == "pgagnn" else "baseline"
     torch.set_float32_matmul_precision("highest")
     torch.backends.cudnn.allow_tf32 = False
     args.float32_matmul_precision = torch.get_float32_matmul_precision()

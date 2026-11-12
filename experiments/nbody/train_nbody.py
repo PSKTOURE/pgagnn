@@ -52,6 +52,8 @@ from src.primitives import (
     embed_scalar,
     embed_translation,
     equivariant_join,
+    euclidean_dual,
+    extract_centered_point,
     extract_point,
 )
 from src.utils import seed_everything
@@ -304,13 +306,16 @@ class O3Transform:
         return graph
 
 
-def embed_inputs(inputs: torch.Tensor) -> torch.Tensor:
+def embed_inputs(inputs: torch.Tensor, *, centered: bool = False) -> torch.Tensor:
     """Embeds the input tensor using appropriate embedding functions.
 
     Parameters
     ----------
     inputs : torch.Tensor with shape (batch_size, num_objects, 7)
         Input tensor where each object has 7 features: mass, position (x,y,z), velocity (vx,vy,vz).
+    centered : bool
+        Encode already-centered positions with their Euclidean dual. Centering
+        and restoring the centroid are handled by the PGA-GNN forward pipeline.
 
     Returns
     -------
@@ -323,6 +328,8 @@ def embed_inputs(inputs: torch.Tensor) -> torch.Tensor:
 
     m_embedded = embed_scalar(m)  # (batch_size, num_objects, 16)
     x_embedded = embed_point(x)  # (batch_size, num_objects, 16)
+    if centered:
+        x_embedded = euclidean_dual(x_embedded)
     v_embedded = embed_translation(v)  # (batch_size, num_objects, 16)
 
     # (batch_size, num_objects, 16)
@@ -331,14 +338,16 @@ def embed_inputs(inputs: torch.Tensor) -> torch.Tensor:
     return embedded_inputs
 
 
-def embed_inputs_packed(inputs: torch.Tensor) -> torch.Tensor:
-    """Embeds packed input tensor (N, 7) for sparse PyG-style batches."""
+def embed_inputs_packed(inputs: torch.Tensor, *, centered: bool = False) -> torch.Tensor:
+    """Embed packed inputs; centered=True expects positions centered per graph."""
     m = inputs[..., 0:1]  # (N, 1)
     x = inputs[..., 1:4]  # (N, 3)
     v = inputs[..., 4:7]  # (N, 3)
 
     m_embedded = embed_scalar(m)  # (N, 16)
     x_embedded = embed_point(x)  # (N, 16)
+    if centered:
+        x_embedded = euclidean_dual(x_embedded)
     v_embedded = embed_translation(v)  # (N, 16)
 
     embedded_inputs = m_embedded + x_embedded + v_embedded
@@ -516,9 +525,14 @@ def _forward_ga_dense(
     model, batch, inputs, targets, edge_attr, adj, device, use_edge_attr=False, dist_embedder=None, **kwargs
 ):
     B, N = inputs.shape[:2]
-    scalars = torch.zeros((B, N, 1), device=device)
+    scalars = torch.zeros((B, N, 1), device=device, dtype=inputs.dtype)
+    centered = isinstance(model, PGA_GNN)
+    origin = inputs[..., 1:4].mean(dim=1, keepdim=True)
+    if centered:
+        inputs = inputs.clone()
+        inputs[..., 1:4] = inputs[..., 1:4] - origin
     reg = 0.0
-    inputs_emb = embed_inputs(inputs)
+    inputs_emb = embed_inputs(inputs, centered=centered)
     if adj is None:
         adj = torch.ones((B, N, N), device=device)
     ref = inputs_emb.mean(dim=(1, 2), keepdim=True)
@@ -532,7 +546,10 @@ def _forward_ga_dense(
         u = dst - src
         src_embedded = pos_embedded.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, 16)
         dst_embedded = pos_embedded.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, 16)
-        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref).unsqueeze(-2)  # (B, N, N, 1, 16)
+        point_ref = pos_embedded.mean(dim=1, keepdim=True).unsqueeze(1) if centered else ref
+        edge_attr_mv = equivariant_join(src_embedded, dst_embedded, point_ref).unsqueeze(-2)
+        if centered:
+            edge_attr_mv = euclidean_dual(edge_attr_mv)  # (B, N, N, 1, 16)
         rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
         rel_norm = dist_embedder(rel_norm)  # (B, N, N, edge_sc)
         edge_attr_sc = rel_norm
@@ -545,7 +562,8 @@ def _forward_ga_dense(
         mv, _ = model(
             inputs_emb, ref=ref, sc=scalars, adj=adj, edge_attr_mv=edge_attr_mv, edge_attr_sc=edge_attr_sc
         )
-    points_pred = extract_point(mv[:, :, 0, :])
+    points_pred = (extract_centered_point(mv[:, :, 0, :]) + origin
+                   if centered else extract_point(mv[:, :, 0, :]))
     return points_pred, targets, B, reg
 
 
@@ -557,8 +575,11 @@ def _forward_ga_sparse(
 
     batch_vec = batch.batch.to(device)
     reg = 0.0
-    scalars = torch.zeros((inputs.size(0), 1), device=device)
-    inputs_emb = embed_inputs_packed(inputs)  # (N, 1, 16)
+    scalars = torch.zeros((inputs.size(0), 1), device=device, dtype=inputs.dtype)
+    origin = scatter_mean(inputs[:, 1:4], batch_vec, dim=0)
+    inputs = inputs.clone()
+    inputs[:, 1:4] = inputs[:, 1:4] - origin[batch_vec]
+    inputs_emb = embed_inputs_packed(inputs, centered=True)  # (N, 1, 16)
     edge_index = batch.edge_index.to(device)
 
     base_edge_attr_sc = edge_attr.to(device) if (use_edge_attr and edge_attr is not None) else None
@@ -580,10 +601,12 @@ def _forward_ga_sparse(
         u = x_j - x_i  # (num_edges, 3)
         src_embedded = embed_point(x_i)  # (num_edges, 16)
         dst_embedded = embed_point(x_j)  # (num_edges, 16)
-        ref_edge = ref[batch_vec[src]].squeeze(1)  # (E, 16)
+        point_ref = scatter_mean(embed_point(inputs[:, 1:4]), batch_vec, dim=0, dim_size=num_graphs)
+        ref_edge = point_ref[batch_vec[src]]  # (E, 16)
         edge_attr_mv = equivariant_join(src_embedded, dst_embedded, ref_edge).unsqueeze(
             -2
         )  # (num_edges, 1, 16)
+        edge_attr_mv = euclidean_dual(edge_attr_mv)
         rel_norm = torch.linalg.norm(u, dim=-1, keepdim=True) + 1e-8
         rel_norm = dist_embedder(rel_norm).to(device)  # (num_edges, edge_sc)
         edge_attr_sc = torch.cat([rel_norm, edge_attr_sc], dim=-1)
@@ -597,7 +620,7 @@ def _forward_ga_sparse(
         edge_attr_sc=edge_attr_sc,
         batch=batch_vec,
     )
-    points_pred = extract_point(mv[:, 0, :].float())
+    points_pred = extract_centered_point(mv[:, 0, :]) + origin[batch_vec]
     B = num_graphs
     return points_pred, targets, B, reg
 
@@ -1020,6 +1043,7 @@ def main():
     """Main training function."""
     # Parse arguments
     args = parse_args()
+    args.geometry_encoding = "centered_euclidean_dual" if args.model_name == "pgagnn" else "baseline"
 
     # Set random seed for reproducibility
     seed_everything(args.seed)

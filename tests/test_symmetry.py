@@ -159,12 +159,13 @@ def test_molecular_embedding_translation_padding_and_distances(sparse):
 
 @pytest.mark.parametrize('sparse', [False, True])
 @pytest.mark.parametrize('smooth_cutoff', [False, True])
-def test_md17_energy_force_proper_rotations_and_translations(sparse, smooth_cutoff):
+@pytest.mark.parametrize('det', [1, -1])
+def test_md17_energy_force_rigid_transformations(sparse, smooth_cutoff, det):
     from experiments.md17.train_md17_energy_based import GAModel, EnergyPredictor, embed_inputs
     torch.manual_seed(31)
     model = GAModel(make_base(sparse), EnergyPredictor(2, 4, hidden=8),
                     sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8, smooth_cutoff=smooth_cutoff).double().eval()
-    q, t, _ = transform_matrix(1)
+    q, t, _ = transform_matrix(det)
     def evaluate(batch):
         batch.pos.requires_grad_(True)
         energy = model(embed_inputs(batch, torch.device('cpu'), sparse))
@@ -187,13 +188,14 @@ def test_md17_energy_force_proper_rotations_and_translations(sparse, smooth_cuto
 
 @pytest.mark.parametrize('sparse', [False, True])
 @pytest.mark.parametrize('mode', ['atomic_sum', 'pooled_mlp', 'dipole_vector'])
-def test_qm9_readouts_proper_rotations_and_translations(sparse, mode):
+@pytest.mark.parametrize('det', [1, -1])
+def test_qm9_readouts_rigid_transformations(sparse, mode, det):
     from experiments.qm9.train_qm9 import ModelWrapper, GraphRegressor, embed_inputs
     torch.manual_seed(7)
     model = ModelWrapper('pgagnn', make_base(sparse), GraphRegressor(2, 4, hidden=8, readout_mode=mode),
                          sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8).double().eval()
     b = molecule_batch()
-    q, t, _ = transform_matrix(1)
+    q, t, _ = transform_matrix(det)
     transformed = b.clone()
     transformed.pos = b.pos @ q.T + t
     def predict(batch):
@@ -259,3 +261,109 @@ def test_centered_readout_retains_point_radius():
     zero = torch.zeros(2, 16, dtype=DTYPE, requires_grad=True)
     invariants(zero, centered=True).sum().backward()
     assert torch.isfinite(zero.grad).all()
+
+
+@pytest.mark.parametrize('det', [1, -1])
+def test_centered_geometry_encoding_and_decoding(det):
+    from src.primitives import euclidean_dual, extract_centered_point
+    b = molecule_batch()
+    p = b.pos - torch.stack([b.pos[b.batch == k].mean(0) for k in (0, 1)])[b.batch]
+    q, _, action = transform_matrix(det, translate=False)
+    a = euclidean_dual(embed_point(p))
+    ar = euclidean_dual(embed_point(p @ q.T))
+    torch.testing.assert_close(ar, act(a, action))
+    torch.testing.assert_close(extract_centered_point(a), p)
+    # Include the near-zero scalar-denominator branch in the O(3) guarantee.
+    a[:, 0] = 0
+    torch.testing.assert_close(extract_centered_point(act(a, action)),
+                               extract_centered_point(a) @ q.T)
+
+
+@pytest.mark.parametrize('sparse', [False, True])
+@pytest.mark.parametrize('mode', ['atomic_sum', 'pooled_mlp', 'dipole_vector'])
+def test_qm9_reflection_with_amplified_six_layer_weights(sparse, mode):
+    from experiments.qm9.train_qm9 import ModelWrapper, GraphRegressor, embed_inputs
+    torch.manual_seed(123)
+    model = ModelWrapper('pgagnn', make_base(sparse, layers=6),
+                         GraphRegressor(2, 4, hidden=8, readout_mode=mode),
+                         sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8).double().eval()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.ndim >= 2:
+                parameter.mul_(2)
+    b = molecule_batch()
+    q, t, _ = transform_matrix(-1)
+    bt = b.clone()
+    bt.pos = b.pos @ q.T + t
+    a = model(embed_inputs(b, 'trivector', torch.device('cpu'), sparse))
+    transformed = model(embed_inputs(bt, 'trivector', torch.device('cpu'), sparse))
+    torch.testing.assert_close(a, transformed, atol=2e-10, rtol=2e-10)
+    a.square().sum().backward()
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+
+
+@pytest.mark.parametrize('sparse', [False, True])
+def test_md17_reflection_with_amplified_six_layer_weights(sparse):
+    from experiments.md17.train_md17_energy_based import GAModel, EnergyPredictor, embed_inputs
+    torch.manual_seed(123)
+    model = GAModel(make_base(sparse, layers=6), EnergyPredictor(2, 4, hidden=8),
+                    sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8, smooth_cutoff=True).double().eval()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.ndim >= 2:
+                parameter.mul_(2)
+    b = molecule_batch()
+    q, t, _ = transform_matrix(-1)
+    bt = b.clone()
+    bt.pos = b.pos @ q.T + t
+    def predict(batch):
+        batch.pos.requires_grad_(True)
+        e = model(embed_inputs(batch, torch.device('cpu'), sparse))
+        force = -torch.autograd.grad(e.sum(), batch.pos, create_graph=True)[0]
+        return e, force
+    a, force = predict(b)
+    transformed, force_t = predict(bt)
+    torch.testing.assert_close(a, transformed, atol=2e-9, rtol=2e-9)
+    torch.testing.assert_close(force_t, force @ q.T, atol=2e-8, rtol=2e-8)
+    (a.square().sum() + force.square().sum()).backward()
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+
+
+@pytest.mark.parametrize('sparse', [False, True])
+@pytest.mark.parametrize('det', [1, -1])
+@pytest.mark.parametrize('use_edges', [False, True])
+def test_nbody_production_pipeline_rigid_transformations(sparse, det, use_edges):
+    from experiments.nbody.train_nbody import _forward_ga_dense, _forward_ga_sparse
+    from src.layers import GaussianRadialBasisLayer
+    torch.manual_seed(123)
+    model = PGA_GNN(1, 8, out_mvc=1, in_sc=1, hidden_sc=8, out_sc=1,
+                    edge_mvc=1 if use_edges else None,
+                    edge_sc=(5 if sparse else 4) if use_edges else None,
+                    num_layers=6, num_heads=2, dropout_prob=0., factorize=True,
+                    use_grade_modulation=False, use_pseudoscalar=False,
+                    attention_type='gatr_sparse' if sparse else 'gatr').double().eval()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.ndim >= 2:
+                parameter.mul_(2)
+    b = molecule_batch()
+    velocity = torch.randn_like(b.pos)
+    mass = b.pos.new_ones((b.pos.size(0), 1))
+    q, t, _ = transform_matrix(det)
+    rbf = GaussianRadialBasisLayer(num_bases=4).double() if use_edges else None
+    def predict(pos, vel):
+        inputs = torch.cat([mass, pos, vel], -1)
+        if sparse:
+            edge_scalars = pos.new_ones((b.edge_index.size(1), 1)) if use_edges else None
+            return _forward_ga_sparse(model, b, inputs, torch.zeros_like(pos), edge_scalars,
+                                      None, pos.device, use_edge_attr=use_edges, dist_embedder=rbf)[0]
+        # Four noncoplanar points per dense system expose parity-sensitive terms.
+        dense = torch.stack([inputs[:4], inputs[torch.tensor([0, 1, 2, 4])]])
+        adj = pos.new_ones((2, 4, 4))
+        return _forward_ga_dense(model, None, dense, torch.zeros_like(dense[..., 1:4]),
+                                 None, adj, pos.device, use_edge_attr=use_edges, dist_embedder=rbf)[0]
+    a = predict(b.pos, velocity)
+    transformed = predict(b.pos @ q.T + t, velocity @ q.T)
+    torch.testing.assert_close(transformed, a @ q.T + t, atol=2e-8, rtol=2e-8)
+    a.square().sum().backward()
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())

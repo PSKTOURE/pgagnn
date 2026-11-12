@@ -83,3 +83,8 @@ The same physical-coordinate reflection check also fails for the current MD17 pi
 The existing N-body tests do reflect Cartesian positions and velocities, then re-embed, and therefore test the correct physical behavior. Their passing result is specific to the tested configuration/weights/tolerances. Reusing their two-layer dense model and fixture gives position discrepancy 4.38e-9 at original weights, which fits their atol=1e-8, rtol=1e-6 tolerance. Multiplying matrix-valued weights by 2 gives discrepancy 0.0172413. A six-layer counterpart gives 4.53e-6 at ordinary initialization and 0.246587 at scale 2. Thus the passing shallow test does not establish an architecture-wide reflection guarantee. Reproduction is in `runs/qm9/preflight/check_md17_nbody_reflections.py`.
 
 No running MD17 training jobs were stopped, modified, or resubmitted during these checks. A failure of the guarantee does not alone measure the symmetry error of the actual trained checkpoints; those need separate evaluation.
+
+
+## Implemented correction
+
+The centered Euclidean-dual encoding is now integrated into the QM9 and MD17 PGA-GNN wrappers and the dense/packed N-body PGA-GNN pipelines. N-body decodes centered positions and restores each system's input centroid. Baseline model paths retain their original encodings. See geometry_encoding.md for the transformation argument, checkpoint interpretation, and validation summary. The pre-fix findings above describe the checkpoint commit 3f234d7; rerunning the counterexample scripts on the corrected source now passes. The independent checkpoint/requeue and CRIANN runtime issues listed above remain outstanding; this change does not submit or resume training jobs.

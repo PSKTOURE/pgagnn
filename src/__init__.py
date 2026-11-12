@@ -44,6 +44,8 @@ from .primitives import (
     embed_vector,
     equi_linear,
     equivariant_join,
+    euclidean_dual,
+    extract_centered_point,
     extract_point,
     geometric_product,
     grade_project,
@@ -95,6 +97,8 @@ __all__ = [
     "embed_vector",
     "equi_linear",
     "equivariant_join",
+    "euclidean_dual",
+    "extract_centered_point",
     "extract_point",
     "geometric_product",
     # Attention Mechanisms

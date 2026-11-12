@@ -48,7 +48,7 @@ from src.checkpointing import StopSignalHandler, load_checkpoint, parse_signals,
 from src.ggnn import GGNN
 from src.layers import BesselRadialBasisLayer, GaussianRadialBasisLayer, PolynomialCutoff
 from src.pgagnn import PGA_GNN
-from src.primitives import embed_point, equivariant_join
+from src.primitives import embed_point, equivariant_join, euclidean_dual
 from src.utils import seed_everything
 
 # Extend pytorch printing options for debugging (disable line breaks)
@@ -225,12 +225,12 @@ class GAModel(nn.Module):
             return self.head(out_v, out_s, mask=graph_batch.mask, batch_vec=graph_batch.batch)
         else:
             out_mv, out_sc = self.base_model(
-                mv=graph_batch.mv,
-                ref=graph_batch.ref,
+                mv=euclidean_dual(graph_batch.mv),
+                ref=euclidean_dual(graph_batch.ref) if graph_batch.ref is not None else None,
                 adj=graph_batch.adj,
                 sc=sc_embedded,
                 edge_index=edge_index,
-                edge_attr_mv=edge_attr_mv,
+                edge_attr_mv=euclidean_dual(edge_attr_mv) if edge_attr_mv is not None else None,
                 edge_attr_sc=edge_attr_sc_encoded,
                 batch=graph_batch.batch,
                 mask=graph_batch.mask,
@@ -1526,6 +1526,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    args.geometry_encoding = "centered_euclidean_dual" if args.model_name == "pgagnn" else "baseline"
     torch.set_float32_matmul_precision("highest")
     torch.backends.cudnn.allow_tf32 = False
     args.float32_matmul_precision = torch.get_float32_matmul_precision()

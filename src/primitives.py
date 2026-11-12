@@ -449,6 +449,33 @@ def embed_point(x: torch.Tensor, type: str = "trivector") -> torch.Tensor:
     return mv
 
 
+def euclidean_dual(x: torch.Tensor) -> torch.Tensor:
+    """Right-multiply a PGA multivector by e123^{-1} = -e123.
+
+    For centered Cartesian point embeddings and their canonical joins, this
+    removes the extra determinant factor under O(3), giving inputs that transform
+    under the network's ordinary versor action. Apply after constructing joins.
+    This uses the invertible Euclidean pseudoscalar, not the null PGA e0123.
+    Translation invariance must be supplied by per-graph centering upstream.
+    """
+    inverse_i3 = x.new_zeros(16)
+    inverse_i3[14] = -1
+    return geometric_product(x, inverse_i3)
+
+
+def extract_centered_point(x: torch.Tensor, threshold: float = 1e-3) -> torch.Tensor:
+    """Decode a centered point from its scalar and ideal-bivector coefficients.
+
+    euclidean_dual(embed_point(p)) = 1 - e0 p. For general hidden states these
+    slots still transform as an O(3) scalar and vector. Clamping the scalar
+    denominator therefore preserves O(3) equivariance, including near zero.
+    Add the input graph centroid to recover an absolute position.
+    """
+    weight = x[..., 0:1]
+    weight = torch.where(weight.abs() > threshold, weight, threshold)
+    return -x[..., 5:8] / weight
+
+
 def extract_point(multivector: torch.Tensor, threshold: float = 1e-3) -> torch.Tensor:
     """Given a multivector, extract any potential 3D point from the trivector components.
 
