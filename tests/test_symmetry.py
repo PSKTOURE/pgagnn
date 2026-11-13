@@ -395,3 +395,33 @@ def test_md17_geometric_edge_ablation_removes_only_join_information(sparse):
     assert (full(graph) - original).abs().max() > 1e-8
     assert ablated.edge_encoder is not None and ablated.distance_embedder is not None
     assert sum(p.numel() for p in full.parameters()) == sum(p.numel() for p in ablated.parameters())
+
+
+@pytest.mark.parametrize('packed', [False, True])
+def test_nbody_encoding_keeps_mass_position_and_velocity_independent(packed):
+    from experiments.nbody.train_nbody import embed_inputs, embed_inputs_packed
+    from src.primitives import embed_scalar, embed_translation
+    embed = embed_inputs_packed if packed else embed_inputs
+    shape = (4, 7) if packed else (2, 4, 7)
+    torch.manual_seed(83)
+    inputs = torch.randn(*shape, dtype=DTYPE)
+    inputs[..., 1:4] -= inputs[..., 1:4].mean(dim=-2, keepdim=True)
+    encoded = embed(inputs, centered=True).squeeze(-2)
+    recovered = torch.cat([encoded[..., 0:1] - 1, -encoded[..., 5:8], encoded[..., 2:5]], -1)
+    torch.testing.assert_close(recovered, inputs, atol=1e-14, rtol=1e-14)
+    # This paired position/velocity change previously left the node embedding identical.
+    delta = torch.randn_like(inputs[..., 1:4])
+    delta -= delta.mean(dim=-2, keepdim=True)
+    changed = inputs.clone()
+    changed[..., 1:4] += delta
+    changed[..., 4:7] -= 2 * delta
+    assert not torch.allclose(embed(changed, centered=True), embed(inputs, centered=True))
+    # Seven physical inputs have seven independent, differentiable directions.
+    vector = inputs.reshape(-1, 7)[0].clone().requires_grad_()
+    jacobian = torch.autograd.functional.jacobian(
+        lambda x: embed(x.unsqueeze(0), centered=True).flatten(), vector)
+    assert torch.linalg.matrix_rank(jacobian).item() == 7
+    # The baseline convention is unchanged when centered=False.
+    expected = (embed_scalar(inputs[..., 0:1]) + embed_point(inputs[..., 1:4])
+                + embed_translation(inputs[..., 4:7])).unsqueeze(-2)
+    torch.testing.assert_close(embed(inputs), expected, atol=0, rtol=0)

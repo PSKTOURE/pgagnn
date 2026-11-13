@@ -314,8 +314,9 @@ def embed_inputs(inputs: torch.Tensor, *, centered: bool = False) -> torch.Tenso
     inputs : torch.Tensor with shape (batch_size, num_objects, 7)
         Input tensor where each object has 7 features: mass, position (x,y,z), velocity (vx,vy,vz).
     centered : bool
-        Encode already-centered positions with their Euclidean dual. Centering
-        and restoring the centroid are handled by the PGA-GNN forward pipeline.
+        Encode centered positions as ideal bivectors and velocities as Euclidean
+        vectors, keeping their coefficients separate. Centering and restoring
+        the centroid are handled by the PGA-GNN forward pipeline.
 
     Returns
     -------
@@ -330,7 +331,11 @@ def embed_inputs(inputs: torch.Tensor, *, centered: bool = False) -> torch.Tenso
     x_embedded = embed_point(x)  # (batch_size, num_objects, 16)
     if centered:
         x_embedded = euclidean_dual(x_embedded)
-    v_embedded = embed_translation(v)  # (batch_size, num_objects, 16)
+        # Position occupies e01/e02/e03; velocity uses separate polar-vector slots.
+        v_embedded = torch.zeros_like(x_embedded)
+        v_embedded[..., 2:5] = v
+    else:
+        v_embedded = embed_translation(v)  # (batch_size, num_objects, 16)
 
     # (batch_size, num_objects, 16)
     embedded_inputs = m_embedded + x_embedded + v_embedded
@@ -348,7 +353,10 @@ def embed_inputs_packed(inputs: torch.Tensor, *, centered: bool = False) -> torc
     x_embedded = embed_point(x)  # (N, 16)
     if centered:
         x_embedded = euclidean_dual(x_embedded)
-    v_embedded = embed_translation(v)  # (N, 16)
+        v_embedded = torch.zeros_like(x_embedded)
+        v_embedded[..., 2:5] = v
+    else:
+        v_embedded = embed_translation(v)  # (N, 16)
 
     embedded_inputs = m_embedded + x_embedded + v_embedded
     return embedded_inputs.unsqueeze(1)  # (N, 1, 16)
@@ -1043,7 +1051,7 @@ def main():
     """Main training function."""
     # Parse arguments
     args = parse_args()
-    args.geometry_encoding = "centered_euclidean_dual" if args.model_name == "pgagnn" else "baseline"
+    args.geometry_encoding = "centered_euclidean_dual_vector_velocity" if args.model_name == "pgagnn" else "baseline"
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
