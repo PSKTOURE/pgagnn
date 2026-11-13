@@ -17,3 +17,15 @@ Validation exercises the actual Cartesian pipelines with proper/improper rotatio
 Validation completed on 12 November 2026: 114 tests passed on CPU. The original six-layer MD17 counterexample now has energy discrepancy below 9e-15 and force discrepancy below 3.1e-13 in float64. QM9 and N-body reflection counterexamples likewise agree at float64 numerical precision. Local Quadro T2000 GPU float32 checks passed for all three QM9 head modes, Gaussian/Bessel MD17 energy and force-loss backward paths, and N-body position equivariance. These symmetry and gradient checks do not establish training accuracy for the new encoding.
 
 The N-body velocity correction retains the scalar/ideal-bivector output decoder: it predicts a future position relative to the input system centroid, then restores that centroid. It does not add a displacement to each input particle position. Input/output channel counts and layer parameter shapes are unchanged. Regression checks cover separate recovery of all seven node inputs, the former position/velocity collision, full-rank input Jacobians, and preservation of the baseline embedding.
+
+## N-body input channel comparison
+
+A local single-seed pilot on 13 November 2026 retained the one-channel vector-velocity encoding. Each variant used 100 training systems (subsample 0.001), all 5,000 validation systems, seed 42, dropout seed 1042, batch size 64, and 2,000 optimizer steps. The two-layer model used 64 multivector and 128 scalar hidden channels, eight heads, Gaussian distance features, Adam with learning rate 3e-4 and weight decay 1e-6, 80 warmup steps, and cosine decay. Matching-shape initial weights and batch order were shared. Validation was evaluated every 200 steps. Test and OOD sets were not evaluated.
+
+| Input encoding | Parameters | Best validation MSE | Step |
+|---|---:|---:|---:|
+| One channel, vector-grade velocity | 606,373 | 0.00462093 | 1,200 |
+| Separate mass/point/velocity channels, motor velocity | 606,775 | 0.00474853 | 800 |
+| Separate mass/point/velocity channels, vector-grade velocity | 606,775 | 0.00493432 | 400 |
+
+Separate vector channels learned faster initially but overfit earlier; their best validation MSE was 6.8% higher than the single-channel variant. This limited pilot supports retaining the current encoding, without establishing the ranking under full training or across seeds. The multi-channel experiment options were removed from production. Local pilot outputs and source snapshots remain under runs/nbody/input_encoding_pilot and runs/nbody/separate_vector_pilot.
