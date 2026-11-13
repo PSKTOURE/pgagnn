@@ -49,6 +49,38 @@ def test_geometric_product_identity():
     assert torch.allclose(prod, x, atol=1e-6)
 
 
+
+def test_all_basis_products_match_clifford_generator_relations():
+    """Check the stored kernel independently of its construction and table signs."""
+    blades = [(), (0,), (1,), (2,), (3,), (0, 1), (0, 2), (0, 3),
+              (1, 2), (1, 3), (2, 3), (0, 1, 2), (0, 1, 3),
+              (0, 2, 3), (1, 2, 3), (0, 1, 2, 3)]
+    basis = torch.eye(16, dtype=torch.float64)
+    actual = geometric_product(basis[:, None, :], basis[None, :, :])
+    expected = torch.zeros_like(actual)
+    for i, left in enumerate(blades):
+        for j, right in enumerate(blades):
+            word = list(left + right)
+            sign = 1
+            # Anticommute neighboring distinct generators; e0^2=0, ei^2=1.
+            while True:
+                for k in range(len(word) - 1):
+                    if word[k] > word[k + 1]:
+                        word[k], word[k + 1] = word[k + 1], word[k]
+                        sign = -sign
+                        break
+                    if word[k] == word[k + 1]:
+                        if word[k] == 0:
+                            sign = 0
+                            word = []
+                        else:
+                            del word[k:k + 2]
+                        break
+                else:
+                    break
+            expected[i, j, blades.index(tuple(word))] = sign
+    assert torch.equal(actual, expected)
+
 def test_geometric_product_associativity():
     torch.manual_seed(42)
     x = torch.randn(2, 3, 16, dtype=torch.float64)

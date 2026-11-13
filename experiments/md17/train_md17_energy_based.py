@@ -148,6 +148,7 @@ class GAModel(nn.Module):
         cutoff: float = 5.0,
         smooth_cutoff: bool = False,
         radial_basis: str = "gaussian",
+        no_geometric_edges: bool = False,
     ):
         super().__init__()
         self.base_model = base_model
@@ -161,6 +162,7 @@ class GAModel(nn.Module):
         if smooth_cutoff and not isinstance(base_model, PGA_GNN):
             raise ValueError("smooth_cutoff is implemented for PGA_GNN")
         self.smooth_cutoff = smooth_cutoff
+        self.no_geometric_edges = no_geometric_edges
         self.cutoff_envelope = PolynomialCutoff(cutoff)
         # self.vect_encoder = nn.Linear(3, edge_sc_hidden)
 
@@ -199,6 +201,9 @@ class GAModel(nn.Module):
                 graph_batch.edge_index, distances, fill_value=0., num_nodes=graph_batch.mv.size(0))
             _, edge_attr_mv = add_remaining_self_loops(
                 graph_batch.edge_index, edge_attr_mv, fill_value=0., num_nodes=graph_batch.mv.size(0))
+        if self.no_geometric_edges and edge_attr_mv is not None:
+            # Remove join information while retaining identical projections, RBFs and graph.
+            edge_attr_mv = torch.zeros_like(edge_attr_mv)
         edge_weight = self.cutoff_envelope(distances).squeeze(-1) if self.smooth_cutoff else None
         # Encode normally; gate the actual attention/value paths after all edge
         # projections and normalization, rather than only tapering their inputs.
@@ -1457,6 +1462,8 @@ def parse_args():
     parser.add_argument("--smooth_cutoff", action="store_true",
                         help="Use C2 cutoff-weighted attention with unit-weight self-edges (PGA-GNN).")
     parser.add_argument("--radial_basis", choices=["gaussian", "bessel"], default="gaussian")
+    parser.add_argument("--no_geometric_edges", action="store_true",
+                        help="Zero join-edge inputs; retain scalar RBF features, projections and connectivity.")
     parser.add_argument("--skip_test", action="store_true", help="Select on validation and defer test evaluation.")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=3500)
@@ -1621,6 +1628,7 @@ def main():
         cutoff=args.cutoff,
         smooth_cutoff=args.smooth_cutoff,
         radial_basis=args.radial_basis,
+        no_geometric_edges=args.no_geometric_edges,
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

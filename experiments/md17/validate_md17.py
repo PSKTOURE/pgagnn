@@ -58,7 +58,8 @@ def make_model(c, device):
                    sc_dim=c['embed_dim'], edge_rbf_dim=c['num_rbf'],
                    edge_sc_hidden=c['edge_sc'], cutoff=c['cutoff'],
                    smooth_cutoff=c.get('smooth_cutoff', False),
-                   radial_basis=c.get('radial_basis', 'gaussian')).to(device)
+                   radial_basis=c.get('radial_basis', 'gaussian'),
+                   no_geometric_edges=c.get('no_geometric_edges', False)).to(device)
 
 
 def main():
@@ -109,7 +110,8 @@ def main():
         '--data_dir', str(a.data_dir.resolve()), '--runs_dir', 'runs/md17/aspirin',
     ]) + '\n')
 
-    raw = a.data_dir / 'raw/rmd17/npz_data/rmd17_aspirin.npz'
+    from torch_geometric.datasets import MD17
+    raw = a.data_dir / 'raw/rmd17/npz_data' / MD17.file_names[c['dataset']]
     split_dir = a.data_dir / 'raw/rmd17/splits'
     train_file = split_dir / f"index_train_{c['split_idx']:02d}.csv"
     test_file = split_dir / f"index_test_{c['split_idx']:02d}.csv"

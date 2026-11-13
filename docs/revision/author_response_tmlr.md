@@ -1,6 +1,6 @@
 # Author Response and Rebuttal (TMLR Submission)
 
-We thank both reviewers for their insightful, constructive, and thorough reviews of our manuscript. In response to your feedback, we have carefully revised the manuscript (`docs/main_TMLR.tex` and compiled `docs/main_TMLR.pdf`), corrected the mathematical formulations and proofs, resolved all identified typos and diagram labels, and substantially refined the framing and empirical discussions.
+<!-- We thank both reviewers for their insightful, constructive, and thorough reviews of our manuscript. In response to your feedback, we have carefully revised the manuscript (`docs/main_TMLR.tex` and compiled `docs/main_TMLR.pdf`), corrected the mathematical formulations and proofs, resolved all identified typos and diagram labels, and substantially refined the framing and empirical discussions.
 
 Below is an overview of the key revisions, followed by detailed point-by-point responses to Reviewer L4x7 and Reviewer BYPr.
 
@@ -21,25 +21,28 @@ Below is an overview of the key revisions, followed by detailed point-by-point r
 3. **Symmetry Guarantees and Reported Benchmarks:**
    The reported benchmark results are unchanged from the original submission. The QM9 experiments in Table 2 use the $SE(3)$-invariant readout. The $E(3)$-invariant variant has been checked numerically for its symmetry properties but has not yet been retrained across all 12 targets; the reported errors therefore characterize the $SE(3)$-invariant variant.
 
-4. **Positioning and Technical Comparison with GAFL and GATr (Sections 1, 2, and 3.2):**
-   We added Wagner et al. (NeurIPS 2024; GAFL) to our references and expanded Sections 1, 2 (Related Work), and 3.2. We explicitly attribute the bilinear factorization of multivector aggregation to prior art (Clifford Frame Attention in GAFL), and provide an equation-level comparison delineating PGA-GNN's formulation: global projective algebra $\mathcal{G}_{3,0,1}$ on general geometric graphs (without requiring local residue frames), coupled with explicit geometric edge multivectors ($\mathbf{E}_{ij}$ via the join) and physical scalar edge attributes ($\mathbf{e}_{ij}$).
+4. **Positioning and Technical Comparison with GAFL and GATr (Sections 1, 2, and 4.4):**
+   We cite Wagner et al. (NeurIPS 2024; GAFL) in the Introduction (Section 1), Related Work (Section 2), and the computational factorization discussion (Section 4.4). Section 2 provides a qualitative architectural comparison, and Section 4.4 presents PGA-GNN's factorization in Equation (20), acknowledging the prior use of bilinearity in Clifford Frame Attention. The comparison highlights PGA-GNN's formulation: global projective algebra $\mathcal{G}_{3,0,1}$ on general geometric graphs (without requiring local residue frames), coupled with explicit geometric edge multivectors ($\mathbf{E}_{ij}$ via the join) and physical scalar edge attributes ($\mathbf{e}_{ij}$).
 
 5. **Nuanced and Accurate Framing of Empirical Results (Abstract, Sections 1, 5.2, and 5.3):**
-   We removed all overstatements ("across the board", "near-perfect", "fundamentally more efficient", "diluting sparse topological priors"). We clearly characterize the task-dependent nature of the results: standout gains on spring systems and in low-data regimes; lower average errors and improved force predictions across all ten molecules on rMD17 compared to 2-body baselines (EGNN, SEGNN), while acknowledging that specialized higher-order cluster expansion models (MACE, NequIP) achieve lower errors; and top performance on three properties on QM9 ($\mu, \alpha, C_v$), while EGNN attains the better aggregate GMRE score. We describe these as scalar molecular targets and limit the discussion to the observed performance differences.
+   We revised the framing of the empirical results to emphasize task-dependent performance. We clearly characterize the task-dependent nature of the results: standout gains on spring systems and in low-data regimes; lower average errors and improved force predictions on all ten rMD17 molecules relative to EGNN and on nine of ten relative to SEGNN, while acknowledging that specialized higher-order cluster expansion models (MACE, NequIP) achieve lower errors; and top performance on three properties on QM9 ($\mu, \alpha, C_v$), while EGNN attains the better aggregate GMRE score. We describe these as scalar molecular targets and limit the discussion to the observed performance differences.
 
 6. **Direct Acknowledgment of Ablation Limitations (Section 6):**
    We explicitly state in the manuscript and response that component ablations are conducted solely on gravitational N-body systems. We acknowledge that they do not isolate the specific drivers of the large gains in spring dynamics or the performance on QM9, narrowing our conclusions accordingly.
 
-7. **Grounded Systems and Hardware Discussion (Section 5.4 and Appendix E):**
-   We qualified the Pareto efficiency claims strictly to the evaluated axes (FLOPs vs. error and parameters vs. error). In Appendix E and Section 5.4, we discuss measured inference latency and GPU memory as empirical trade-offs, and present architectural factors (dense matrix operations in set transformers vs. edge materialization and scatter/gather in GNNs) as plausible hypotheses rather than asserting unverified low-level kernel dispatches as facts.
+7. **Grounded Systems and Hardware Discussion (Section 5.4 and Appendix C.1):**
+   We qualified the Pareto efficiency claims strictly to the evaluated axes (FLOPs vs. error and parameters vs. error). In Appendix C.1 and Section 5.4, we discuss measured inference latency and GPU memory as empirical trade-offs, and state that operation-level memory attribution and kernel-dispatch profiling were not performed. Possible architectural explanations are presented as hypotheses rather than measured causes.
 
-8. **Typos and Diagram Labels Corrected:**
+8. **Reference Tables and Aggregate Scores Corrected:**
+   We corrected 12 sign errors in the appendix Cayley table. All 256 basis-blade products in the implementation independently match the stated generator relations, so these table errors do not affect the multiplication kernel. We recalculated all revised-MD17 means from the ten displayed molecule rows, correcting the GATr means to 490.48 meV energy and 123.35 meV/Å force as well as inconsistent literature-column means. We corrected SEGNN's QM9 ZPVE to 1.62 meV and recomputed GMRE from the displayed MAEs: 1.118 (EGNN), 1.294 (SEGNN), 2.037 (GATr), and 1.245 (PGA-GNN). The aggregate ranking is unchanged.
+
+9. **Typos and Diagram Labels Corrected:**
    - Section 5.2: "euclidean distances" $\to$ "Euclidean distances".
-   - Figure 1 (`docs/images/article_draft_imgs/diagram.pdf`): "Classic operations" $\to$ "Classical operations".
+   - Figure 1: "Classic operations" $\to$ "Classical operations".
 
----
+--- -->
 
-## Detailed Response to Reviewer L4x7
+## Response to Reviewer L4x7
 
 > **Reviewer Summary:** *"This paper proposes PGA-GNN, an E(3)-equivariant graph neural network based on Projective Geometric Algebra... The method demonstrates strong empirical performance... The presentation is quite clear... Claims supported: Yes. Audience interest: Yes."*
 
@@ -64,12 +67,10 @@ We have tempered all contribution statements throughout the manuscript to reflec
 **Response:**
 We agree with the reviewer that lower theoretical arithmetic complexity (FLOPs) does not automatically translate to lower wall-clock inference latency or smaller GPU memory footprints on modern hardware. 
 
-In the revised manuscript (Section 5.4 and Appendix E, Table 6), we have explicitly addressed this distinction:
+In the revised manuscript (Section 5.4 and Appendix C.1, Table 6), we have explicitly addressed this distinction:
 - **Empirical Trade-off:** As measured on an NVIDIA A100 GPU for a batch of $B=64$ systems of $N=15$ bodies, PGA-GNN achieves an out-of-distribution MSE of $(2.02 \pm 0.21) \times 10^{-6}$ with $6.795\text{ GFLOPs}$, compared to $(2.33 \pm 0.08) \times 10^{-3}$ and $25.033\text{ GFLOPs}$ for GATr. In wall-clock terms, GATr executes faster ($62.03\text{ ms}$ vs. $86.27\text{ ms}$) and with less memory ($50.0\text{ MB}$ vs. $347.1\text{ MB}$).
-- **Plausible Systems Factors:** We hypothesize that this difference is driven by two factors:
-  1. GATr operates over node multivector sets ($C=16$) without edge attributes, allowing it to execute via regular dense batched matrix multiplications.
-  2. PGA-GNN operates with a larger multivector channel capacity ($C=64$) and explicitly materializes geometric edge multivectors ($\mathbf{E}_{ij}$) and 64-dimensional RBF distance expansions across all directed edges ($B \times N^2$), which increases peak memory and introduces scatter-gather indexing operations that may incur kernel launch overhead on small graphs ($N=15$).
-- **Qualified Pareto Claims:** In Section 5.4, we have restricted our Pareto efficiency claims strictly to the hardware-agnostic metrics evaluated: arithmetic complexity (FLOPs vs. OOD Error) and parameter footprint (Parameters vs. OOD Error). We explicitly note that on small, dense systems, dense set attention can execute faster in wall-clock time despite performing $3.7\times$ more arithmetic operations.
+- **Possible Systems Factors:** The evaluated models differ in channel capacity and explicit edge features. These are plausible contributors to the memory difference. Operation layouts and data movement may also affect latency, but we did not profile kernel dispatch, time individual operations, or isolate per-operation memory allocations. We therefore do not attribute the measured differences to specific kernels or operations.
+- **Qualified Pareto Claims:** In Section 5.4, we have restricted our Pareto efficiency claims strictly to the hardware-agnostic metrics evaluated: arithmetic complexity (FLOPs vs. OOD Error) and parameter footprint (Parameters vs. OOD Error). The measurements show that the evaluated GATr implementation is faster on this small system despite performing $3.7\times$ more arithmetic operations; they do not establish a general latency advantage or its cause.
 
 ---
 
@@ -80,11 +81,11 @@ In the revised manuscript (Section 5.4 and Appendix E, Table 6), we have explici
 **Response:**
 Both typos have been corrected in the revised manuscript:
 - Section 5.2 now reads: *"encoding pairwise Euclidean distances via a Gaussian Radial Basis Function (RBF)..."*
-- Figure 1 (`docs/images/article_draft_imgs/diagram.pdf`): The text in the vector diagram has been updated from "Classic operations" to "Classical operations".
+- Figure 1: The text in the vector diagram has been updated from "Classic operations" to "Classical operations".
 
 ---
 
-## Detailed Response to Reviewer BYPr
+## Response to Reviewer BYPr
 
 > **Reviewer Summary:** *"The paper proposes PGA-GNN, a graph neural network that represents geometric features as multivectors in projective geometric algebra... The model provides a coherent formulation... mathematical development... strong practical benefits in several evaluated settings... However, architectural novelty is somewhat unclear... empirical advantages are task-dependent... explanations of gains provide limited evidence... inaccuracies in specific invariance statements and supporting proofs."*
 
@@ -99,12 +100,12 @@ We thank Reviewer BYPr for their constructive, rigorous, and technically precise
 We agree with the reviewer's assessment. Pairwise geometric-algebra interactions, equivariant PGA primitives, and bilinear aggregation factorization have precedents in the literature, notably in GATr (Brehmer et al., 2023) and GAFL (Wagner et al., NeurIPS 2024). We apologize for not citing GAFL in the initial submission and for phrasing the bilinear factorization as entirely unique to our work.
 
 In the revised manuscript, we have made the following updates:
-1. **Direct Citation and Attribution:** We have added Wagner et al. (NeurIPS 2024) to our bibliography and explicitly cited GAFL in Sections 1, 2, and 3.2.
-2. **Detailed Architectural Comparison:** In Section 2 (Related Work) and Section 3.2, we provide an equation-level comparison distinguishing PGA-GNN from GATr and GAFL:
+1. **Direct Citation and Attribution:** We have added Wagner et al. (NeurIPS 2024) to our bibliography and cited GAFL in Sections 1 and 2 and in Section 4.4, immediately after Equation (20).
+2. **Architectural Comparison and Factorization:** Section 2 (Related Work) qualitatively compares PGA-GNN with GATr and GAFL. Section 4.4 derives PGA-GNN's aggregation factorization in Equation (20) and acknowledges the related use of bilinearity in GAFL:
    - **GAFL / Clifford Frame Attention (CFA):** GAFL is designed for protein backbone generation and operates on local residue reference frames (canonicalized coordinate frames constructed from backbone atoms). Multivectors are defined relative to these local frames, and interactions are evaluated by transforming features between frames. In contrast, PGA-GNN operates on general geometric graphs (not restricted to macromolecules with backbone frames) in a unified global projective space $\mathcal{G}_{3,0,1}$, avoiding frame construction or prediction steps.
-   - **GATr:** GATr operates as a set transformer over bare node multivectors via self-attention and does not support explicit geometric or scalar edge features.
+   - **GATr:** The comparison concerns the standard set-transformer formulation, which uses self-attention over node multivectors without the explicit geometric and scalar edge inputs used by PGA-GNN.
    - **PGA-GNN's Distinctive Formulation:** PGA-GNN formulates edge-conditioned message passing on geometric graphs: directed edges carry explicit geometric multivectors $\mathbf{E}_{ij}$ (constructed via the equivariant join) and scalar physical attributes $\mathbf{e}_{ij}$ (such as spring constants, interaction types, or radial basis expansions). These attributes modulate node messages alongside a parallel scalar message track.
-   - **Bilinear Factorization:** In Section 3.2, we explicitly acknowledge that factoring the multivector product outside the neighborhood sum via bilinearity was also leveraged by Wagner et al. (2024). We clarify that in PGA-GNN, this property is integrated into an edge-conditioned graph message-passing architecture that combines node-level multivector bilinears with explicit edge multivectors ($\mathbf{E}_{ij}$) and scalar edge features. We also clarify the total layer complexity: while the geometric product evaluations scale as $\mathcal{O}(N \cdot C)$, edge scalar encoding, attention weights, and neighborhood scatter-reductions still scale with $|\mathcal{E}|$.
+   - **Bilinear Factorization:** In Section 4.4, we explicitly acknowledge that factoring the multivector product outside the neighborhood sum via bilinearity was also leveraged by Wagner et al. (2024). We clarify that in PGA-GNN, this property is integrated into an edge-conditioned graph message-passing architecture that combines node-level multivector bilinears with explicit edge multivectors ($\mathbf{E}_{ij}$) and scalar edge features. We also clarify the total layer complexity: while the geometric product evaluations scale as $\mathcal{O}(N \cdot C)$, edge scalar encoding, attention weights, and neighborhood scatter-reductions still scale with $|\mathcal{E}|$.
 
 ---
 
@@ -112,14 +113,14 @@ In the revised manuscript, we have made the following updates:
 > **Weakness 2:** *"The empirical advantages are task-dependent, providing limited support for the breadth of the paper’s claims. The strongest improvements occur in the synthetic spring system, while the gravitational N-body gains are more modest. On MD17, PGA-GNN substantially improves over the reported EGNN and SEGNN baselines but remains behind MACE and NequIP on both energy and force prediction. On QM9, it achieves the best results on three of twelve properties, while EGNN obtains the better aggregate score. These findings demonstrate benefits in particular settings, but do not establish a consistent advantage across the physical and molecular tasks considered."*
 
 **Response:**
-We fully agree with the reviewer. The empirical evidence demonstrates substantial benefits in specific settings—most prominently on interacting spring dynamics and in low-data regimes—rather than a uniform, universal superiority across all tasks.
+We fully agree with the reviewer. The empirical evidence demonstrates substantial benefits in specific settings, most prominently on interacting spring dynamics and in low-data regimes, rather than a uniform, universal superiority across all tasks.
 
-We have thoroughly revised the Abstract, Introduction, Section 5.2, Section 5.3, and Conclusion to provide a balanced and accurate account:
+We have revised the Abstract, Introduction, Section 5.2, Section 5.3, and Conclusion to provide a balanced and accurate account:
 - **Spring Systems:** We highlight that the largest and most consistent advantages occur on the synthetic spring benchmark, especially under data scarcity and out-of-distribution system size generalization.
 - **Gravitational N-Body:** We state that gains on gravitational N-body dynamics are modest compared to baselines.
-- **Revised MD17:** We removed phrases like "across the board". We report that PGA-GNN lowers average energy and force prediction errors compared to our reported 2-body baselines (EGNN and SEGNN), and improves force prediction across all ten molecules relative to EGNN. At the same time, we explicitly state that PGA-GNN does not match specialized machine learning potentials like MACE and NequIP, which incorporate higher-order many-body cluster expansions. We also clarified that literature PaiNN results were averaged over a 7-molecule subset (excluding Azobenzene, Benzene, and Paracetamol), making direct 10-molecule mean comparisons non-equivalent.
-- **QM9:** We explicitly report that EGNN achieves the lowest overall GMRE (1.119 vs. PGA-GNN's 1.253), driven by its lower errors on thermodynamic energies ($U_0, U, H, G$) and spatial extent ($R^2$). We report straightforwardly that among the compared 2-body architectures, PGA-GNN obtains the lowest error on three properties: dipole moment ($\mu = 0.016\text{ D}$), isotropic polarizability ($\alpha = 0.059\text{ bohr}^3$), and heat capacity ($C_v = 0.029\text{ cal/mol K}$). We describe these as scalar molecular targets without attributing the performance differences to mechanisms not isolated by the available ablations.
-- **Data Splits:** We reconciled the text and captions on rMD17: the dataset uses the standard 1,000-sample split consisting of 950 training samples and 50 validation samples.
+- **Revised MD17:** We removed phrases like "across the board". We report that PGA-GNN lowers average energy and force prediction errors compared to our reported 2-body baselines (EGNN and SEGNN), and improves force prediction on all ten molecules relative to EGNN and on nine of ten relative to SEGNN; ethanol favors SEGNN (14.04 versus 13.75 meV/Å). At the same time, we explicitly state that PGA-GNN does not match specialized machine learning potentials like MACE and NequIP, which incorporate higher-order many-body cluster expansions. We identify MACE (Batatia et al., 2022, Table 1) as the source of the reproduced PaiNN rMD17 results. PaiNN's mean covers seven molecules, whereas the other means cover ten; the manuscript and caption explicitly distinguish these averaging sets.
+- **QM9:** We explicitly report that EGNN achieves the lowest overall GMRE (1.118 vs. PGA-GNN's 1.245), driven by its lower errors on thermodynamic energies ($U_0, U, H, G$) and spatial extent ($R^2$). We report straightforwardly that among the compared 2-body architectures, PGA-GNN obtains the lowest error on three properties: dipole moment ($\mu = 0.016\text{ D}$), isotropic polarizability ($\alpha = 0.059\text{ bohr}^3$), and heat capacity ($C_v = 0.029\text{ cal/mol K}$). We describe these as scalar molecular targets without attributing the performance differences to mechanisms not isolated by the available ablations.
+- **Data Splits:** We reconciled the text and captions on rMD17: our labeled budget of 1,000 configurations consists of 950 optimization samples and 50 validation samples. The table caption distinguishes these runs from literature columns, which retain their source protocols; identical optimization sets, validation allocations, or test splits are not assumed.
 
 ---
 
@@ -129,9 +130,9 @@ We have thoroughly revised the Abstract, Introduction, Section 5.2, Section 5.3,
 **Response:**
 The reviewer makes an excellent point. Because the GATr baseline in our molecular experiments was evaluated with the identical sparse graph adjacency mask ($\mathbf{A}_{ij} > 0$), attributing the performance difference to "local message passing vs. global attention" was inaccurate.
 
-We have revised Section 5.2, Section 5.3, Section 6, and the Conclusion as follows:
-- **Reframed GATr Comparison:** We removed the claim that this comparison isolates locality. We now explain that because both models receive the same connectivity mask, the performance gap reflects other architectural differences: namely, GATr self-attention does not ingest explicit geometric edge multivectors ($\mathbf{E}_{ij}$) or scalar physical edge attributes (such as RBF distance expansions), whereas PGA-GNN explicitly conditions both geometric messages and scalar channels on edge attributes.
-- **Force Optimization Stability as an Empirical Hypothesis:** We have rephrased our discussion of force optimization through deep attention maps. Rather than asserting it as an established causal fact, we explicitly frame it as an empirical hypothesis and open question for future study.
+We have revised the Introduction, Sections 4.7, 5.2, 5.3, and 6, and the Conclusion as follows:
+- **Reframed GATr Comparison:** We removed the claim that this comparison isolates locality. We now explain that because both models receive the same connectivity mask, the comparison concerns architectures that differ in their message construction and use of edge features. PGA-GNN explicitly conditions messages on geometric edge multivectors ($\mathbf{E}_{ij}$) and scalar physical attributes, whereas the evaluated GATr formulation does not. The current comparison does not isolate which of these differences drives the observed performance.
+- **Force Optimization Stability as an Empirical Hypothesis:** We have qualified the force-optimization discussion in both the Introduction and Section 5.2. Rather than asserting it as an established causal fact, we explicitly frame it as an empirical hypothesis and open question for future study.
 - **Direct Acknowledgment of Ablation Scope:** We explicitly state in Section 6 that our component ablations are conducted solely on gravitational N-body systems. We state directly that they do not isolate which specific architectural components drive the strong spring dynamics gains or the mixed molecular results, and narrow our conclusions accordingly.
 
 ---
@@ -175,10 +176,8 @@ We completely replaced the proof of Lemma 4 in Appendix A.2 with an established 
    Both terms are grade-2 bivectors: $(\mathbf{p}_j - \mathbf{p}_i)\mathbf{e}_{123}$ is the Euclidean direction bivector, while $\mathbf{e}_0 (\mathbf{p}_i \times \mathbf{p}_j)$ is the ideal moment bivector. We corrected Equation (8) in the main text, which previously swapped these assignments, and removed improper duals on the moment that produced trivectors.
 4. **Reflection Parity Cancellation:** Under spatial reflections ($R \in O(3), \det(R) = -1$), the bare Euclidean join flips sign by $(-1)^n = -1$, yielding $\rho_V(\mathbf{X}_i) \vee \rho_V(\mathbf{X}_j) = \det(R) \rho_V(\mathbf{X}_i \vee \mathbf{X}_j)$. For the reference-modulated join $\mathrm{EquiJoin}(\mathbf{X}_i, \mathbf{X}_j; \mathbf{Z}_{\text{ref}}) = z_{\text{ref}}(\mathbf{X}_i \vee \mathbf{X}_j)$, the orientation coefficient transforms as $\langle \rho_V(\mathbf{Z}_{\text{ref}}) \rangle_{123} = \det(R) \langle \mathbf{Z}_{\text{ref}} \rangle_{123}$. This yields an overall factor of $\det(R)^2 = (-1)^2 = +1$, canceling the parity sign and establishing strict $E(3)$ equivariance across the entire Pin group.
 
-We have verified this complete algebraic formulation across all 256 basis blade pairs under representative translations and reflections in our test suite.
-
 ---
 
-## Conclusion
+<!-- ## Conclusion
 
-We believe these substantial revisions resolve the theoretical inaccuracies, appropriately contextualize our empirical findings, clarify our contributions relative to prior geometric algebra models (GATr and GAFL), and significantly improve the precision and rigor of the paper. We look forward to any further feedback from the reviewers and the Action Editor.
+We believe these substantial revisions resolve the theoretical inaccuracies, appropriately contextualize our empirical findings, clarify our contributions relative to prior geometric algebra models (GATr and GAFL), and significantly improve the precision and rigor of the paper. We look forward to any further feedback from the reviewers and the Action Editor. -->

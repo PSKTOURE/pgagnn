@@ -1044,6 +1044,12 @@ def main():
     # Parse arguments
     args = parse_args()
     args.geometry_encoding = "centered_euclidean_dual" if args.model_name == "pgagnn" else "baseline"
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    args.float32_matmul_precision = torch.get_float32_matmul_precision()
+    args.cuda_matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    args.cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
 
     # Set random seed for reproducibility
     seed_everything(args.seed)

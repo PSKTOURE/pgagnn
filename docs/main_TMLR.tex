@@ -1,9 +1,9 @@
 \documentclass[10pt]{article}
-%\usepackage{tmlr}
+\usepackage{tmlr}
 % If accepted, instead use the following line for the camera-ready submission:
 %\usepackage[accepted]{tmlr}
 % To de-anonymize and remove mentions to TMLR (for example for posting to preprint servers), instead use the following:
-\usepackage[preprint]{tmlr}
+%\usepackage[preprint]{tmlr}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{hyperref}
 \usepackage{graphicx}
@@ -43,7 +43,7 @@
 
 \maketitle
 \begin{abstract}
-    Processing 3D geometric graphs in physical sciences requires neural networks that strictly preserve continuous spatial symmetries. Projective Geometric Algebra (PGA) offers an expressive alternative to spherical harmonics and invariant scalars by uniformly encoding geometric primitives and rigid motions as multivectors. However, existing deep learning architectures in PGA formulate interactions primarily via set self-attention without explicit edge conditioning. We introduce the Projective Geometric Algebra Graph Neural Network (PGA-GNN), an $E(3)$-equivariant architecture that combines PGA multivector representations with edge-conditioned graph message passing. PGA-GNN explicitly computes messages between neighboring nodes using an edge-modulated geometric product, combining geometric edge multivectors (via the equivariant join) and physical scalar attributes into coupled feature streams. PGA-GNN demonstrates strong empirical advantages in low-data physical systems, particularly on interacting spring dynamics. On Revised MD17, it improves force predictions across all ten molecules compared to 2-body baselines (EGNN, SEGNN), while on QM9 it achieves the lowest error among compared 2-body models on three properties ($\mu, \alpha, C_v$). While specialized higher-order cluster expansion models remain leading for molecular potentials, our findings show that explicit geometric edge conditioning in PGA provides a principled and competitive foundation for geometric graph learning.
+    Processing 3D geometric graphs in physical sciences requires neural networks that strictly preserve continuous spatial symmetries. Projective Geometric Algebra (PGA) offers an expressive alternative to spherical harmonics and invariant scalars by uniformly encoding geometric primitives and rigid motions as multivectors. However, existing deep learning architectures in PGA formulate interactions primarily via set self-attention without explicit edge conditioning. We introduce the Projective Geometric Algebra Graph Neural Network (PGA-GNN), an $E(3)$-equivariant architecture that combines PGA multivector representations with edge-conditioned graph message passing. PGA-GNN explicitly computes messages between neighboring nodes using an edge-modulated geometric product, combining geometric edge multivectors (via the equivariant join) and physical scalar attributes into coupled feature streams. PGA-GNN demonstrates strong empirical advantages in low-data physical systems, particularly on interacting spring dynamics. On Revised MD17, it improves force predictions on all ten molecules relative to EGNN and on nine of ten relative to SEGNN, while on QM9 it achieves the lowest error among compared 2-body models on three properties ($\mu, \alpha, C_v$). While specialized higher-order cluster expansion models remain leading for molecular potentials, our findings show that explicit geometric edge conditioning in PGA provides a principled and competitive foundation for geometric graph learning.
 \end{abstract}
 
 \section{Introduction}
@@ -52,7 +52,7 @@ The intersection of deep learning and the physical sciences, often termed AI4Sci
 
 To address this, the field of equivariant deep learning has seen rapid development, yet existing paradigms often force a difficult trade-off between computational efficiency and geometric expressivity. Methods based on invariant scalarization (e.g., EGNN \citep{egnn}) are highly efficient but computationally collapse complex directional interactions into simple distances, losing structural depth. Conversely, architectures relying on irreducible representations and spherical harmonics (e.g., SEGNN \citep{segnn}, MACE \citep{mace}) preserve angular rigor but introduce significant computational overhead due to complex tensor products.
 
-Recently, Projective Geometric Algebra (PGA) has emerged as an elegant mathematical alternative. By providing a closed algebraic system that uniformly represents geometric objects (points, lines, planes) and transformations as multivectors, PGA bypasses the need for cumbersome tensor products. The Geometric Algebra Transformer \citep[GATr;][]{gatr} demonstrated the potential of this approach, maintaining strict $E(3)$ equivariance via scalable dot-product attention on sets of multivectors. However, standard PGA transformers rely on global self-attention and lack mechanisms to ingest explicit geometric and physical edge attributes. Furthermore, in low-data regimes, backpropagating through deep multi-head attention maps when deriving physical forces via analytical gradients presents optimization challenges.
+Recently, Projective Geometric Algebra (PGA) has emerged as an elegant mathematical alternative. By providing a closed algebraic system that uniformly represents geometric objects (points, lines, planes) and transformations as multivectors, PGA bypasses the need for cumbersome tensor products. The Geometric Algebra Transformer \citep[GATr;][]{gatr} demonstrated the potential of this approach, maintaining strict $E(3)$ equivariance via scalable dot-product attention on sets of multivectors. However, standard PGA transformers rely on global self-attention and lack mechanisms to ingest explicit geometric and physical edge attributes. In low-data regimes, optimization through attention maps when deriving forces from energy gradients may contribute to the observed performance differences; this is an empirical hypothesis that our current experiments do not isolate.
 
 In this work, we bridge the mathematical elegance of projective geometric algebra with edge-conditioned graph message passing. We introduce the \emph{Projective Geometric Algebra Graph Neural Network (PGA-GNN)}, an $E(3)$-equivariant architecture that defines structural interactions directly via the \textit{geometric product} and explicit edge representations. Rather than relying solely on node-level attention, PGA-GNN computes algebraic messages between neighboring nodes conditioned on both geometric multivector edges and scalar physical attributes. Moreover, by leveraging the bilinear distributivity of the geometric product—a property also utilized in Clifford Frame Attention \citep{gafl} our architecture factorizes message aggregation, reducing the number of expensive multivector geometric product evaluations from $\mathcal{O}(|\mathcal{E}|)$ to $\mathcal{O}(N)$.
 
@@ -61,7 +61,7 @@ Our main contributions are summarized as follows:
     \item \textbf{Edge-Conditioned PGA Message-Passing Formulation:} We propose an equivariant message-passing formulation that natively propagates 16-dimensional PGA multivectors alongside coupled scalar streams. By modulating the geometric product with explicit geometric edge attributes (via the equivariant join) and scalar attributes (such as physical interaction parameters or distance expansions), we establish a structured prior for geometric graphs.
     \item \textbf{Equivariance Guarantees and Bilinear Factorization:} We analyze the $E(3)$ equivariance of the architecture by construction, providing rigorous proofs for the equivariant join, multivector message transformations, and invariant readout maps. We leverage bilinear distributivity to factorize geometric message aggregation, executing multivector products once per node rather than once per edge.
     \item \textbf{Strong Performance in Low-Data and Physical Dynamics:} We evaluate PGA-GNN across synthetic physical systems and molecular benchmarks. The model exhibits standout sample efficiency and size generalization on interacting spring systems, outperforming both invariant and steerable baselines in low-data regimes.
-    \item \textbf{Empirical Characterization Across Molecular Benchmarks:} On Revised MD17, PGA-GNN achieves lower average energy and force errors than reported 2-body baselines (EGNN and SEGNN), improving force prediction across all ten evaluated molecules while remaining behind specialized higher-order cluster expansion models (MACE, NequIP). On QM9, it achieves the lowest error among compared 2-body baselines on three properties ($\mu, \alpha, C_v$).
+    \item \textbf{Empirical Characterization Across Molecular Benchmarks:} On Revised MD17, PGA-GNN achieves lower average energy and force errors than reported 2-body baselines (EGNN and SEGNN), improving force prediction on all ten molecules relative to EGNN and on nine of ten relative to SEGNN, while remaining behind specialized higher-order cluster expansion models (MACE, NequIP). On QM9, it achieves the lowest error among compared 2-body baselines on three properties ($\mu, \alpha, C_v$).
 \end{itemize}
 
 
@@ -512,7 +512,7 @@ To model complex angular interactions, state-of-the-art models like SEGNN \citep
 
 \noindent
 \textbf{Structural Prior vs. Global Transformers.}
-While GATr \citep{gatr} proved the viability of PGA in deep learning, its global attention mechanism ($\mathcal{O}(N^2)$ complexity) dilutes the sparse, local topological priors that are crucial in physical systems. PGA-GNN bridges this gap by embedding PGA into a localized message-passing paradigm, leveraging sparse graphs to drastically improve sample efficiency and scalability while retaining mathematical rigor.
+GATr \citep{gatr} formulates interactions through set self-attention, while PGA-GNN defines messages on graph edges and conditions them on geometric and scalar edge attributes. Sparse message passing can reduce interaction costs when the number of edges grows more slowly than $N^2$; actual scaling depends on graph density and implementation. In our molecular comparisons, GATr receives the same adjacency mask as PGA-GNN, so those results do not isolate locality as the cause of performance differences. Attributing sample efficiency or accuracy gains to edge conditioning or other architectural choices requires controlled ablations.
 
 
 \noindent
@@ -569,7 +569,7 @@ Overall, the results demonstrate that PGA-GNN provides a strong geometric induct
 To evaluate the capacity of our architecture to model complex atomic interactions and predict continuous physical properties, we benchmark PGA-GNN on the Revised MD17 dataset \citep{rmd17}.
 
 \noindent\textbf{Dataset Description.}
-The Revised MD17 dataset \citep{md17} provides noise-free DFT energies and atomic forces for 10 small organic molecules. To evaluate generalization and avoid data leakage from temporal autocorrelation, we strictly adhere to the recommended small-data regime. For each molecule, we train on only $1000$ samples ($950$ train, $50$ validation) and evaluate on the official Split 1 test sets. The task is to predict both total molecular energy and atomic forces.
+The Revised MD17 dataset \citep{md17} provides noise-free DFT energies and atomic forces for 10 small organic molecules. To evaluate generalization and avoid data leakage from temporal autocorrelation, we strictly adhere to the recommended small-data regime. For each molecule, our labeled budget is $1000$ configurations: $950$ are used for optimization and $50$ are held out for validation and model selection. We evaluate on the official Split 1 test sets. Literature results retain the protocols of their cited sources; the nominal small-data setting does not imply identical optimization sets, validation allocations, or test splits across all columns. The task is to predict both total molecular energy and atomic forces.
 
 \noindent\textbf{Experimental Setup.}
 PGA-GNN is configured with 6 layers ($2.3$M parameters). Atomic numbers $Z$ are mapped to scalar node features, while 3D coordinates are embedded as trivectors. Edges are built within a $5$~\AA\ radial cutoff, encoding pairwise Euclidean distances via a Gaussian Radial Basis Function (RBF) \citep{rbf} as scalar features. Models are trained jointly on potential energies and atomic forces using a weighted Mean Squared Error (MSE) loss:
@@ -580,7 +580,7 @@ PGA-GNN is configured with 6 layers ($2.3$M parameters). Atomic numbers $Z$ are 
 where $\lambda_F = 1000.0$ and $\lambda_E = 1.0$, balancing force and energy magnitudes following standard practice. Models are trained for 3500 epochs (batch size 32) using AdamW with an initial learning rate of $1 \times 10^{-3}$, a weight decay of $5 \times 10^{-7}$, and a cosine annealing scheduler. We apply an Exponential Moving Average (EMA, decay $0.999$) and trigger Stochastic Weight Averaging (SWA) at epoch 3000.
 
 \noindent\textbf{Results and Discussion.}
-Table~\ref{tab:md17_results} summarizes the predictive performance on the Revised MD17 dataset. PGA-GNN achieves lower average energy and force prediction errors than our reported 2-body baselines, EGNN and SEGNN. Notably, PGA-GNN achieves an average force MAE of $9.94\text{ meV/\AA}$ compared to $16.06\text{ meV/\AA}$ for EGNN (a $38\%$ reduction, improving force predictions on all ten molecules) and $26.82\text{ meV/\AA}$ for SEGNN (a $63\%$ reduction). On molecular energy prediction, PGA-GNN achieves an average MAE of $4.68\text{ meV}$, outperforming EGNN ($7.79\text{ meV}$) and SEGNN ($11.43\text{ meV}$).
+Table~\ref{tab:md17_results} summarizes the predictive performance on the Revised MD17 dataset. PGA-GNN achieves lower average energy and force prediction errors than our reported 2-body baselines, EGNN and SEGNN. Notably, PGA-GNN achieves an average force MAE of $9.94\text{ meV/\AA}$ compared to $16.06\text{ meV/\AA}$ for EGNN (a $38\%$ reduction, improving force predictions on all ten molecules) and $26.82\text{ meV/\AA}$ for SEGNN (a $63\%$ reduction). Force errors improve on nine of ten molecules relative to SEGNN; ethanol is the exception ($14.04$ versus $13.75\text{ meV/\AA}$). On molecular energy prediction, PGA-GNN achieves an average MAE of $4.68\text{ meV}$, outperforming EGNN ($7.79\text{ meV}$) and SEGNN ($11.43\text{ meV}$).
 
 \noindent
 \textbf{A note on GATr's performance.} 
@@ -589,67 +589,68 @@ First, while the adjacency mask zeroes attention weights for disconnected pairs,
 Second, atomic forces are derived through analytical negative gradients of total energy ($\mathbf{F}_i = -\nabla_{\mathbf{p}_i} E$). Backpropagating gradients through deep multi-head attention maps without explicit edge conditioning may present optimization challenges in low-data regimes ($N_{\text{train}} = 950$ samples, with $50$ validation samples); we frame this force-gradient optimization difficulty as an empirical hypothesis rather than an established causal fact, and future controlled ablations will be valuable to disentangle these factors.
 
 \noindent
-When contextualizing these results, it is important to distinguish between general-purpose network architectures and specialized machine learning potentials. Specialized architectures utilizing high-degree spherical harmonics and many-body cluster expansions (such as MACE \citep{mace} and NequIP \citep{neuqip}) achieve significantly lower absolute energy and force errors, benefiting from explicit many-body interactions. Among general-purpose 2-body models, PGA-GNN achieves competitive results, with an average force prediction of $9.94\text{ meV/\AA}$ across all 10 molecules, approaching the reported average of PaiNN \citep{painn} ($9.01\text{ meV/\AA}$). We note that PaiNN's reported literature average was computed over a 7-molecule subset (excluding Azobenzene, Benzene, and Paracetamol), so direct average-to-average comparisons should be interpreted with caution.
+When contextualizing these results, it is important to distinguish between general-purpose network architectures and specialized machine learning potentials. Specialized architectures utilizing high-degree spherical harmonics and many-body cluster expansions (such as MACE \citep{mace} and NequIP \citep{neuqip}) achieve significantly lower absolute energy and force errors, benefiting from explicit many-body interactions. PGA-GNN achieves an average force MAE of $9.94\text{ meV/\AA}$ across all ten revised-MD17 molecules. The PaiNN \citep{painn} values in Table~\ref{tab:md17_results} are taken from the rMD17 comparison in \citet{mace} (Table 1). Its reported values cover seven molecules, excluding Azobenzene, Benzene, and Paracetamol. PaiNN's mean force MAE of $9.01\text{ meV/\AA}$ therefore summarizes a different molecule set from our ten-molecule mean; these aggregate values should not be interpreted as a matched comparison.
 
 Ultimately, PGA-GNN provides an effective 2-body baseline unconstrained by molecule-specific heuristics. While it does not incorporate explicit higher-order cluster expansions like MACE or NequIP, it shows clear improvements over standard invariant graph models and spherical harmonic baselines of comparable body order, confirming the viability of the geometric product as a tensor-free alternative for capturing directional interactions.
 
 \begin{table*}[t]
     \centering
-    \caption{Mean Absolute Error (MAE) for Energy (E, in meV) and Force (F, in meV/\AA) predictions on the Revised MD17 dataset. All models are trained on $N_{\text{train}} = 1000$ samples. Bold numbers indicate the best performance. Results at the left of the first vertical line are aggregated from the literature.}
+    \caption{Mean Absolute Error (MAE) for Energy (E, in meV) and Force (F, in meV/\AA) predictions on the Revised MD17 dataset. Runs performed in this work use a labeled budget of $1000$ configurations per molecule, comprising $950$ optimization samples and $50$ validation samples. Literature values to the left of the first vertical line, including PaiNN, are reproduced from \citet{mace} (Table 1) and retain their source protocols; identical optimization and validation allocations or test splits are not assumed. PaiNN means cover the seven molecules with reported values; other means cover all ten. Bold numbers indicate the best displayed performance.}
     \resizebox{\textwidth}{!}{%
         \begin{tabular}{llccccc|ccc||c}
             \toprule
              &   & MACE & NequIP & ACE & GAP & PaiNN & EGNN & SEGNN & GATr & \textbf{PGA-GNN (Ours)} \\
             \midrule
-            \multicolumn{11}{c}{$N_{\text{train}} = 1000$}                                                                                                                                     \\
+            \multicolumn{11}{c}{$N_{train} = 950, N_{val} = 50$}                                                                                                                                     \\
             \midrule
             \multirow{2}{*}{\textbf{Aspirin}}
-             & E & \textbf{2.2}    & 2.3                 & 6.1           & 17.7          & 6.9               & 27.41           & 24.31            & 469.27          & 11.01                   \\
-             & F & \textbf{6.6}    & 8.2                 & 17.9          & 44.9          & 16.1              & 31.82           & 59.20             & 92.2            & 17.51                   \\
+             & E & \textbf{2.2}    & 2.3                 & 6.1           & 17.7          & 6.9 & 27.41           & 24.31            & 469.27          & 11.01                   \\
+             & F & \textbf{6.6}    & 8.2                 & 17.9          & 44.9          & 16.1 & 31.82           & 59.20             & 92.2            & 17.51                   \\
             \hline
             \multirow{2}{*}{\textbf{Azobenzene}}
-             & E & 1.2             & \textbf{0.7}        & 3.6           & 8.5           & -                 & 6.95            & 13.62             & 711             & 4.90                    \\
-             & F & 3.0             & \textbf{2.9}        & 10.9          & 24.5          & -                 & 17.39           & 37.41             & 40.56           & 7.73                    \\
+             & E & 1.2             & \textbf{0.7}        & 3.6           & 8.5           & - & 6.95            & 13.62             & 711             & 4.90                    \\
+             & F & 3.0             & \textbf{2.9}        & 10.9          & 24.5          & - & 17.39           & 37.41             & 40.56           & 7.73                    \\
             \hline
             \multirow{2}{*}{\textbf{Benzene}}
-             & E & 0.4             & \textbf{0.04}       & 0.04          & 0.75          & -                 & 0.52            & 0.52              & 88.17           & 1.01                    \\
-             & F & 0.3             & \textbf{0.3}        & 0.5           & 6.0           & -                 & 2.06            & 2.99              & 45.55           & 1.79                    \\
+             & E & 0.4             & \textbf{0.04}       & \textbf{0.04}          & 0.75          & - & 0.52            & 0.52              & 88.17           & 1.01                    \\
+             & F & 0.3             & \textbf{0.3}        & 0.5           & 6.0           & - & 2.06            & 2.99              & 45.55           & 1.79                    \\
             \hline
             \multirow{2}{*}{\textbf{Ethanol}}
-             & E & \textbf{0.4}    & \textbf{0.4}        & 1.2           & 3.5           & 2.7               & 3.90            & 2.14              & 168.77          & 4.23                    \\
-             & F & \textbf{2.1}    & 2.8                 & 7.3           & 18.1          & 10.0              & 17.20           & 13.75             & 93.26           & 14.04                   \\
+             & E & \textbf{0.4}    & \textbf{0.4}        & 1.2           & 3.5           & 2.7 & 3.90            & 2.14              & 168.77          & 4.23                    \\
+             & F & \textbf{2.1}    & 2.8                 & 7.3           & 18.1          & 10.0 & 17.20           & 13.75             & 93.26           & 14.04                   \\
             \hline
             \multirow{2}{*}{\textbf{Malonaldehyde}}
-             & E & \textbf{0.8}    & 0.8                 & 1.7           & 4.8           & 3.9               & 5.59            & 4.62              & 119.17          & 3.74                    \\
-             & F & \textbf{4.1}    & 5.1                 & 11.1          & 26.4          & 13.8              & 19.82           & 20.91             & 128.68          & 14.35                   \\
+             & E & \textbf{0.8}    & 0.8                 & 1.7           & 4.8           & 3.9 & 5.59            & 4.62              & 119.17          & 3.74                    \\
+             & F & \textbf{4.1}    & 5.1                 & 11.1          & 26.4          & 13.8 & 19.82           & 20.91             & 128.68          & 14.35                   \\
             \hline
             \multirow{2}{*}{\textbf{Naphthalene}}
-             & E & \textbf{0.5}    & 0.9                 & 0.9           & 3.8           & 5.1               & 2.14            & 7.14              & 289.35          & 2.84                    \\
-             & F & \textbf{1.6}    & 1.3                 & 5.1           & 16.5          & 3.6               & 6.43            & 18.89             & 85.89           & 4.46                    \\
+             & E & \textbf{0.5}    & 0.9                 & 0.9           & 3.8           & 5.1 & 2.14            & 7.14              & 289.35          & 2.84                    \\
+             & F & 1.6             & \textbf{1.3}                 & 5.1           & 16.5          & 3.6 & 6.43            & 18.89             & 85.89           & 4.46                    \\
             \hline
             \multirow{2}{*}{\textbf{Paracetamol}}
-             & E & \textbf{1.3}    & 1.4                 & 4.0           & 8.5           & -                 & 16.58           & 28.96             & 730             & 9.59                   \\
-             & F & \textbf{4.8}    & 5.9                 & 12.7          & 28.9          & -                 & 26.71           & 61.79             & 84.35           & 14.13                   \\
+             & E & \textbf{1.3}    & 1.4                 & 4.0           & 8.5           & - & 16.58           & 28.96             & 730             & 9.59                   \\
+             & F & \textbf{4.8}    & 5.9                 & 12.7          & 28.9          & - & 26.71           & 61.79             & 84.35           & 14.13                   \\
             \hline
             \multirow{2}{*}{\textbf{Salicylic acid}}
-             & E & 0.9             & \textbf{0.7}        & 1.8           & 5.6           & 4.9               & 9.99            & 21.53             & 415.89          & 4.61                    \\
-             & F & \textbf{3.1}    & 4.0                 & 9.3           & 24.7          & 9.1               & 16.57           & 26.39             & 78.12           & 11.56                   \\
+             & E & 0.9             & \textbf{0.7}        & 1.8           & 5.6           & 4.9 & 9.99            & 21.53             & 415.89          & 4.61                    \\
+             & F & \textbf{3.1}    & 4.0                 & 9.3           & 24.7          & 9.1 & 16.57           & 26.39             & 78.12           & 11.56                   \\
             \hline
             \multirow{2}{*}{\textbf{Toluene}}
-             & E & 0.5             & \textbf{0.3}        & 1.1           & 4.0           & 4.2               & 3.10            & 5.99              & 1884            & 2.53                    \\
-             & F & \textbf{1.5}    & 1.6                 & 6.5           & 17.8          & 4.4               & 10.79           & 10.92             & 478.4           & 5.65                    \\
+             & E & 0.5             & \textbf{0.3}        & 1.1           & 4.0           & 4.2 & 3.10            & 5.99              & 1884            & 2.53                    \\
+             & F & \textbf{1.5}    & 1.6                 & 6.5           & 17.8          & 4.4 & 10.79           & 10.92             & 478.4           & 5.65                    \\
             \hline
             \multirow{2}{*}{\textbf{Uracil}}
-             & E & 0.5             & \textbf{0.4}        & 1.1           & 3.0           & 4.5               & 1.75            & 5.50              & 29.15           & 2.38                    \\
-             & F & \textbf{2.1}    & 3.1                 & 6.6           & 17.6          & 6.1               & 11.84           & 15.94             & 106.48          & 8.19                   \\
+             & E & 0.5             & \textbf{0.4}        & 1.1           & 3.0           & 4.5 & 1.75            & 5.50              & 29.15           & 2.38                    \\
+             & F & \textbf{2.1}    & 3.1                 & 6.6           & 17.6          & 6.1 & 11.84           & 15.94             & 106.48          & 8.19                   \\
             \midrule
             \multicolumn{11}{c}{\textbf{Overall Performance}}                                                                                                                                  \\
             \midrule
             \multirow{2}{*}{\textbf{Mean}}
-             & E & \textbf{0.87}   & 0.93                & 2.25          & 6.01          & 4.6               & 7.79            & 11.43             & 449.63          & 4.68                    \\
-             & F & \textbf{2.66}   & 3.22                & 8.79          & 21.44         & 9.01              & 16.06           & 26.82             & 113.31          & 9.94                   \\
+             & E & 0.87 & \textbf{0.79} & 2.15 & 6.02 & 4.60 & 7.79 & 11.43 & 490.48 & 4.68 \\
+             & F & \textbf{2.92} & 3.52 & 8.79 & 22.54 & 9.01 & 16.06 & 26.82 & 123.35 & 9.94 \\
             \bottomrule
-        \end{tabular}%
+
+\end{tabular}%
     }
     \label{tab:md17_results}
 \end{table*}
@@ -675,7 +676,7 @@ For the QM9 experiments reported in Table~\ref{tab:qm9_results_wide}, we use the
 
 \begin{table*}[t]
     \centering
-    \caption{Mean Absolute Error (MAE) on the 12 target properties of the QM9 dataset. PGA-GNN uses the $SE(3)$-invariant readout with a signed pseudoscalar coefficient. Baseline results for EGNN and SEGNN are taken from their respective publications. Bold indicates the best performing model. \textbf{GMRE} represents the Geometric Mean of Relative Errors, where each MAE is normalized by the best performing score in its respective column before averaging (closer to 1.0 is better).}
+    \caption{Mean Absolute Error (MAE) on the 12 target properties of the QM9 dataset. PGA-GNN uses the $SE(3)$-invariant readout with a signed pseudoscalar coefficient. Baseline results for EGNN and SEGNN are taken from their respective publications. Bold indicates the best performing model. \textbf{GMRE} represents the Geometric Mean of Relative Errors, computed from the displayed MAEs as $\mathrm{GMRE}_m=\exp\!\left[\frac{1}{12}\sum_{t=1}^{12}\log\!\left(\mathrm{MAE}_{m,t}/\min_{m'}\mathrm{MAE}_{m',t}\right)\right]$ (closer to 1.0 is better).}
     \label{tab:qm9_results_wide}
     \resizebox{\textwidth}{!}{%
         \begin{tabular}{lccccccccccccc}
@@ -683,21 +684,21 @@ For the QM9 experiments reported in Table~\ref{tab:qm9_results_wide}, we use the
             \textbf{Model}          & $\alpha$       & $\Delta\varepsilon$ & $\varepsilon_{\text{HOMO}}$ & $\varepsilon_{\text{LUMO}}$ & $\mu$          & $C_v$          & $G$         & $H$         & $R^2$         & $U$         & $U_0$       & ZPVE          & \textbf{GMRE} $\downarrow$ \\
                                     & (bohr$^3$)     & (meV)               & (meV)                       & (meV)                       & (D)            & (cal/mol K)    & (meV)       & (meV)       & (bohr$^2$)    & (meV)       & (meV)       & (meV)         &                            \\
             \midrule
-            EGNN                    & 0.071          & 48                  & 29                          & 25                          & 0.029          & 0.031          & \textbf{12} & \textbf{12} & \textbf{0.11} & \textbf{12} & \textbf{12} & 1.55          & \textbf{1.119}             \\
-            SEGNN                   & 0.060          & \textbf{42}         & \textbf{24}                 & \textbf{21}                 & 0.023          & 0.031          & 15          & 16          & 0.66          & 13          & 15          & \textbf{1.55} & 1.294                      \\
-            GATr                    & 0.100          & 49                  & 28                          & 26                          & 0.020          & 0.043          & 24          & 23          & 2.48          & 28          & 27          & 3.30          & 2.035                      \\
-            \textbf{PGA-GNN (Ours)} & \textbf{0.059} & 48                  & 30                          & 25                          & \textbf{0.016} & \textbf{0.029} & 15          & 15          & 0.34          & 14.7        & 16          & 1.60          & 1.253                      \\
+            EGNN                    & 0.071          & 48                  & 29                          & 25                          & 0.029          & 0.031          & \textbf{12} & \textbf{12} & \textbf{0.11} & \textbf{12} & \textbf{12} & \textbf{1.55} & \textbf{1.118}             \\
+            SEGNN                   & 0.060          & \textbf{42}         & \textbf{24}                 & \textbf{21}                 & 0.023          & 0.031          & 15          & 16          & 0.66          & 13          & 15          & 1.62          & 1.294                      \\
+            GATr                    & 0.100          & 49                  & 28                          & 26                          & 0.020          & 0.043          & 24          & 23          & 2.48          & 28          & 27          & 3.30          & 2.037                      \\
+            \textbf{PGA-GNN (Ours)} & \textbf{0.059} & 48                  & 30                          & 25                          & \textbf{0.016} & \textbf{0.029} & 15          & 15          & 0.34          & 14.7        & 16          & 1.60          & 1.245                      \\
             \bottomrule
         \end{tabular}%
     }
 \end{table*}
 
 \noindent\textbf{Results and Discussion.}
-Table~\ref{tab:qm9_results_wide} reports the MAE across the 12 QM9 target properties alongside the Geometric Mean of Relative Errors (GMRE). EGNN achieves the lowest aggregate GMRE ($1.119$), primarily driven by its lower errors on thermodynamic energies ($U_0$, $U$, $H$, $G$) and spatial extent ($R^2$). PGA-GNN achieves an aggregate GMRE of $1.253$, ranking second among the compared models and outperforming both SEGNN ($1.294$) and GATr ($2.035$).
+Table~\ref{tab:qm9_results_wide} reports the MAE across the 12 QM9 target properties alongside the Geometric Mean of Relative Errors (GMRE). EGNN achieves the lowest aggregate GMRE ($1.118$), primarily driven by its lower errors on thermodynamic energies ($U_0$, $U$, $H$, $G$) and spatial extent ($R^2$). PGA-GNN achieves an aggregate GMRE of $1.245$, ranking second among the compared models and outperforming both SEGNN ($1.294$) and GATr ($2.037$).
 
-Among the compared 2-body architectures, PGA-GNN achieves the lowest error on three properties: dipole moment ($\mu = 0.016\text{ D}$), isotropic polarizability ($\alpha = 0.059\text{ bohr}^3$), and heat capacity ($C_v = 0.029\text{ cal/mol K}$). On the remaining nine targets, SEGNN achieves the lowest errors on orbital energy levels ($\Delta\varepsilon$, HOMO, LUMO) and ZPVE, while EGNN obtains the lowest errors on scalar thermodynamic energies. 
+Among the compared 2-body architectures, PGA-GNN achieves the lowest error on three properties: dipole moment ($\mu = 0.016\text{ D}$), isotropic polarizability ($\alpha = 0.059\text{ bohr}^3$), and heat capacity ($C_v = 0.029\text{ cal/mol K}$). On the remaining nine targets, SEGNN achieves the lowest errors on orbital energy levels ($\Delta\varepsilon$, HOMO, LUMO), while EGNN obtains the lowest errors on thermodynamic energies ($G$, $H$, $U$, $U_0$), spatial extent ($R^2$), and ZPVE.
 
-When compared against GATr (which shares the same underlying $\mathcal{G}_{3,0,1}$ multivector representation and receives the identical graph adjacency mask), PGA-GNN achieves lower errors across all 12 properties, reducing the GMRE from $2.035$ to $1.253$. Because both architectures operate on the same graph connectivity, this empirical difference reflects the architectural formulation—specifically, PGA-GNN's inclusion of explicit geometric edge multivectors ($\mathbf{E}_{ij}$) and scalar edge features within an edge-conditioned message-passing framework, rather than set self-attention over node multivectors alone. 
+When compared against GATr (which shares the same underlying $\mathcal{G}_{3,0,1}$ multivector representation and receives the identical graph adjacency mask), PGA-GNN achieves lower errors across all 12 properties, reducing the GMRE from $2.037$ to $1.245$. Both architectures operate on the same graph connectivity, while differing in message construction and the use of explicit geometric and scalar edge features. The comparison therefore does not isolate locality or establish which architectural difference accounts for the observed errors.
 
 \subsection{Computational Efficiency and Pareto Analysis}
 \label{subsec:pareto_efficiency}
@@ -705,7 +706,7 @@ When compared against GATr (which shares the same underlying $\mathcal{G}_{3,0,1
 To evaluate the computational efficiency and practical scaling of the proposed architecture, we evaluate the floating-point operations (FLOPs), parameter footprint, and out-of-distribution (OOD) generalization error during inference on the N-body spring benchmark ($B=64$ systems of $N=15$ interacting bodies, evaluated at 100 training examples). The results and empirical Pareto frontiers are illustrated in Figure~\ref{fig:flops}.
 
 PGA-GNN requires $6.795\text{ GFLOPs}$ per forward pass with $606\text{k}$ parameters, achieving a Test OOD MSE of $(2.02 \pm 0.21) \times 10^{-6}$. In contrast, the global geometric transformer baseline GATr requires $25.033\text{ GFLOPs}$ ($3.7\times$ higher compute) and $2.21\text{M}$ parameters ($3.6\times$ larger model footprint), with an OOD error substantially higher ($(2.33 \pm 0.08) \times 10^{-3}$). While lightweight scalar (EGNN, $2.043\text{ GFLOPs}$, $134\text{k}$ params) and harmonic (SEGNN, $3.079\text{ GFLOPs}$, $147\text{k}$ params) baselines incur fewer FLOPs by restricting operations to invariant pairwise distances or $l=1$ steerable representations, their constrained geometric expressivity yields higher OOD errors. As depicted in Figure~\ref{fig:flops}, PGA-GNN establishes a non-dominated Pareto frontier across the hardware-agnostic complexity axes of compute efficiency (Accuracy vs. FLOPs) and parameter efficiency (Accuracy vs. Model Size). 
-We emphasize that while FLOPs and parameter counts quantify arithmetic complexity, wall-clock latency and GPU memory consumption also depend on low-level kernel fusion (e.g., FlashAttention kernels in transformers vs.\ sparse graph scatter/gather in GNNs) and edge tensor materialization, which we analyze comprehensively in Appendix~\ref{app:compute} (Table~\ref{tab:benchmarks_hardware}).
+FLOPs and parameter counts quantify arithmetic complexity and model size, while latency and peak memory are measured for the complete implementation on the evaluated hardware. Appendix~\ref{app:compute} (Table~\ref{tab:benchmarks_hardware}) reports these measurements. We have not profiled kernel dispatch or attributed memory and latency to individual operations, so the architectural explanations discussed there are hypotheses rather than measured causes.
 
 \begin{figure}[t]
     \centering
@@ -1143,13 +1144,13 @@ $\mathbf{e}_3$ & $\mathbf{e}_3$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{13}$ & $-\m
 $\mathbf{e}_{01}$ & $\mathbf{e}_{01}$ & $0$ & $\mathbf{e}_0$ & $\mathbf{e}_{012}$ & $\mathbf{e}_{013}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{02}$ & $\mathbf{e}_{03}$ & $\mathbf{e}_{0123}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{023}$ & $0$ \\
 $\mathbf{e}_{02}$ & $\mathbf{e}_{02}$ & $0$ & $-\mathbf{e}_{012}$ & $\mathbf{e}_0$ & $\mathbf{e}_{023}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{01}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{03}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{013}$ & $0$ \\
 $\mathbf{e}_{03}$ & $\mathbf{e}_{03}$ & $0$ & $-\mathbf{e}_{013}$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_0$ & $0$ & $0$ & $0$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{01}$ & $-\mathbf{e}_{02}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{012}$ & $0$ \\
-$\mathbf{e}_{12}$ & $\mathbf{e}_{12}$ & $-\mathbf{e}_{012}$ & $-\mathbf{e}_2$ & $\mathbf{e}_1$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $-1$ & $-\mathbf{e}_{23}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $\mathbf{e}_{03}$ \\
-$\mathbf{e}_{13}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $-\mathbf{e}_{123}$ & $\mathbf{e}_1$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{23}$ & $-1$ & $-\mathbf{e}_{12}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $\mathbf{e}_2$ & $-\mathbf{e}_{02}$ \\
-$\mathbf{e}_{23}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $-1$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_1$ & $\mathbf{e}_{01}$ \\
+$\mathbf{e}_{12}$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_2$ & $\mathbf{e}_1$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $-1$ & $-\mathbf{e}_{23}$ & $\mathbf{e}_{13}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $-\mathbf{e}_{03}$ \\
+$\mathbf{e}_{13}$ & $\mathbf{e}_{13}$ & $\mathbf{e}_{013}$ & $-\mathbf{e}_3$ & $-\mathbf{e}_{123}$ & $\mathbf{e}_1$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{23}$ & $-1$ & $-\mathbf{e}_{12}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $\mathbf{e}_2$ & $\mathbf{e}_{02}$ \\
+$\mathbf{e}_{23}$ & $\mathbf{e}_{23}$ & $\mathbf{e}_{023}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $-1$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_1$ & $-\mathbf{e}_{01}$ \\
 $\mathbf{e}_{012}$ & $\mathbf{e}_{012}$ & $0$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $\mathbf{e}_{0123}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{03}$ & $0$ \\
 $\mathbf{e}_{013}$ & $\mathbf{e}_{013}$ & $0$ & $-\mathbf{e}_{03}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{01}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_0$ & $-\mathbf{e}_{012}$ & $0$ & $0$ & $0$ & $\mathbf{e}_{02}$ & $0$ \\
 $\mathbf{e}_{023}$ & $\mathbf{e}_{023}$ & $0$ & $\mathbf{e}_{0123}$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_0$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{01}$ & $0$ \\
-$\mathbf{e}_{123}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $-\mathbf{e}_1$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{01}$ & $-1$ & $\mathbf{e}_0$ \\
+$\mathbf{e}_{123}$ & $\mathbf{e}_{123}$ & $-\mathbf{e}_{0123}$ & $\mathbf{e}_{23}$ & $-\mathbf{e}_{13}$ & $\mathbf{e}_{12}$ & $-\mathbf{e}_{023}$ & $\mathbf{e}_{013}$ & $-\mathbf{e}_{012}$ & $-\mathbf{e}_3$ & $\mathbf{e}_2$ & $-\mathbf{e}_1$ & $\mathbf{e}_{03}$ & $-\mathbf{e}_{02}$ & $\mathbf{e}_{01}$ & $-1$ & $\mathbf{e}_0$ \\
 $\mathbf{e}_{0123}$ & $\mathbf{e}_{0123}$ & $0$ & $\mathbf{e}_{023}$ & $-\mathbf{e}_{013}$ & $\mathbf{e}_{012}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_{03}$ & $\mathbf{e}_{02}$ & $-\mathbf{e}_{01}$ & $0$ & $0$ & $0$ & $-\mathbf{e}_0$ & $0$ \\
 \bottomrule
 \end{tabular}%
@@ -1223,7 +1224,7 @@ SEGNN          & $147\text{k}$ & $3.079\text{ G}$  & $26.14 \pm 0.05$ & $107.7$ 
 }
 \end{table*}
 
-\paragraph{Analysis of Hardware-Dependent Profiling.}
+paragraph{Analysis of Hardware-Dependent Profiling.}
 The empirical measurements highlight key practical trade-offs between dense set transformers and sparse geometric graph message passing:
 \begin{enumerate}
     \item \textbf{Peak Memory Allocation:} PGA-GNN records a peak allocated memory of $347.1\text{ MB}$, compared to $50.0\text{ MB}$ for GATr. A primary contributing factor is that PGA-GNN maintains a larger multivector channel capacity ($C=64$) and explicitly conditions messages on geometric edge multivectors ($\mathbf{E}_{ij}$) and 64-dimensional RBF distance expansions across all directed edges ($B \times N^2$), which requires materializing intermediate edge-level interaction tensors. In contrast, GATr operates over node multivector sets with smaller channel capacity ($C=16$) without materializing explicit edge feature tensors. In absolute terms, $347.1\text{ MB}$ represents less than $1\%$ of available A100 GPU memory, posing no barrier to execution.

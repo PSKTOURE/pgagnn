@@ -76,8 +76,8 @@ Official PyTorch implementation for the paper:
 ### 1. Clone the Repository (with submodules)
 
 ```bash
-git clone --recursive <REPO_URL>
-cd ga-gnn
+git clone --recurse-submodules https://github.com/PSKTOURE/pgagnn.git
+cd pgagnn
 ```
 
 > **Note**: If you cloned without `--recursive`, initialize submodules with:

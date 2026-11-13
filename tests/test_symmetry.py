@@ -160,11 +160,17 @@ def test_molecular_embedding_translation_padding_and_distances(sparse):
 @pytest.mark.parametrize('sparse', [False, True])
 @pytest.mark.parametrize('smooth_cutoff', [False, True])
 @pytest.mark.parametrize('det', [1, -1])
-def test_md17_energy_force_rigid_transformations(sparse, smooth_cutoff, det):
+@pytest.mark.parametrize('message,no_geometric_edges', [('geometric', False), ('sum', False),
+                                                         ('geometric', True), ('sum', True)])
+def test_md17_energy_force_rigid_transformations(sparse, smooth_cutoff, det, message, no_geometric_edges):
     from experiments.md17.train_md17_energy_based import GAModel, EnergyPredictor, embed_inputs
     torch.manual_seed(31)
-    model = GAModel(make_base(sparse), EnergyPredictor(2, 4, hidden=8),
-                    sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8, smooth_cutoff=smooth_cutoff).double().eval()
+    base = make_base(sparse)
+    for layer in base.layers:
+        layer.message = message
+    model = GAModel(base, EnergyPredictor(2, 4, hidden=8),
+                    sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8, smooth_cutoff=smooth_cutoff,
+                    no_geometric_edges=no_geometric_edges).double().eval()
     q, t, _ = transform_matrix(det)
     def evaluate(batch):
         batch.pos.requires_grad_(True)
@@ -367,3 +373,25 @@ def test_nbody_production_pipeline_rigid_transformations(sparse, det, use_edges)
     torch.testing.assert_close(transformed, a @ q.T + t, atol=2e-8, rtol=2e-8)
     a.square().sum().backward()
     assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+
+
+@pytest.mark.parametrize('sparse', [False, True])
+def test_md17_geometric_edge_ablation_removes_only_join_information(sparse):
+    from experiments.md17.train_md17_energy_based import GAModel, EnergyPredictor, embed_inputs
+    import copy
+    torch.manual_seed(31)
+    full = GAModel(make_base(sparse), EnergyPredictor(2, 4, hidden=8),
+                   sc_dim=8, edge_rbf_dim=4, edge_sc_hidden=8, smooth_cutoff=True).double().eval()
+    ablated = copy.deepcopy(full)
+    ablated.no_geometric_edges = True
+    graph = embed_inputs(molecule_batch(), torch.device('cpu'), sparse)
+    original = ablated(graph)
+    perturbed = copy.copy(graph)
+    perturbed.edge_attr_mv = graph.edge_attr_mv * 7 + 3
+    torch.testing.assert_close(original, ablated(perturbed), atol=0, rtol=0)
+    zeroed = copy.copy(graph)
+    zeroed.edge_attr_mv = torch.zeros_like(graph.edge_attr_mv)
+    torch.testing.assert_close(original, full(zeroed), atol=0, rtol=0)
+    assert (full(graph) - original).abs().max() > 1e-8
+    assert ablated.edge_encoder is not None and ablated.distance_embedder is not None
+    assert sum(p.numel() for p in full.parameters()) == sum(p.numel() for p in ablated.parameters())

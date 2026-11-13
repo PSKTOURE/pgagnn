@@ -8,10 +8,10 @@ The deployed code and overlay consume approximately 101 MB. PyTorch and CUDA are
 
 To recreate the overlay, run `bash experiments/qm9/setup_criann.sh` in a short allocated compute job; login-node resource limits can interrupt installation. The script uses no package cache and does not install PyTorch or CUDA. The dataset is reused at `$HOME/datasets/qm9`, overridable with `QM9_DATA_DIR`. The Python executable can be overridden with `QM9_PYTHON`.
 
-Submit all 12 standard targets, with at most four running concurrently:
+Submit all 12 standard targets with no array concurrency cap:
 
 ```bash
-bash experiments/qm9/submit_criann.sh qm9_e3 all 4
+bash experiments/qm9/submit_criann.sh qm9_e3 all
 ```
 
 Submit one target:
@@ -20,7 +20,7 @@ Submit one target:
 bash experiments/qm9/submit_criann.sh qm9_e3 U0
 ```
 
-The job requests `hpda_mig`, one `a100_1g.10gb` slice, eight CPUs, 16 GiB RAM, and 23:50 hours. Training uses batch 128, 1000 epochs, LR 5e-4, weight decay 5e-7, 15 warmup epochs, EMA 0.999, seed 42, and the existing three-layer sparse PGA-GNN configuration. `QM9_BATCH_SIZE`, `QM9_EPOCHS`, and `QM9_NUM_WORKERS` can override the corresponding values. GPU type, wall time, and resources can be overridden with standard sbatch options when invoking the Slurm script directly.
+The job requests `hpda_mig`, one GPU/MIG device of any available slice size, eight CPUs, 16 GiB RAM, and 23:50 hours. The 10 GB slice is sufficient, but only ten such slices are configured; accepting larger slices allows all twelve targets to run concurrently when scheduling resources permit. Pass a third helper argument, such as 4, only when a concurrency cap is desired. Training uses batch 128, 1000 epochs, LR 5e-4, weight decay 5e-7, 15 warmup epochs, EMA 0.999, seed 42, and the existing three-layer sparse PGA-GNN configuration. `QM9_BATCH_SIZE`, `QM9_EPOCHS`, and `QM9_NUM_WORKERS` can override the corresponding values. GPU type, wall time, and resources can be overridden with standard sbatch options when invoking the Slurm script directly.
 
 ## Persistence and requeue
 

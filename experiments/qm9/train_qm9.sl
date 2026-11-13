@@ -4,7 +4,7 @@
 #SBATCH --error=slurm/qm9/slurm.%x.%j.err
 #SBATCH --open-mode=append
 #SBATCH --partition=hpda_mig
-#SBATCH --gres=gpu:a100_1g.10gb:1
+#SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
